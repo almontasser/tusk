@@ -4,7 +4,7 @@
 //! the indexer thread; each request runs on the pool once the index has caught up with the edits made before it,
 //! except those that read only the document.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -128,8 +128,10 @@ impl Snapshot {
 enum Job {
     /// Discover and index the whole project, replacing the index, with a new configuration if given.
     Build(Option<IndexConfig>),
-    /// A file's new text, or `None` if it's gone. Open documents give their text; closed ones are read from disk.
+    /// An open document's new text.
     Change(PathBuf, Option<Vec<u8>>),
+    /// Files changed or gone on disk, read when the job is applied, off the main loop.
+    Disk(Vec<PathBuf>),
 }
 
 /// The thread that owns index updates, so a slow reader never holds up the main loop.
@@ -291,6 +293,7 @@ pub fn run(connection: Connection) {
         return;
     }
     let mut server = Server::new(connection.sender.clone(), root, options);
+    server.watch_files();
     server.main_loop(&connection.receiver);
 }
 
@@ -495,7 +498,7 @@ impl Server {
                 let Some(path) = uri_to_path(&p.text_document.uri) else { return };
                 self.docs.write().remove(&path);
                 // The index goes back to the file on disk, which may lack unsaved edits.
-                self.indexer.send(Job::Change(path.clone(), std::fs::read(&path).ok()));
+                self.indexer.send(Job::Disk(vec![path.clone()]));
                 self.client.notify::<notification::PublishDiagnostics>(PublishDiagnosticsParams {
                     uri: p.text_document.uri,
                     diagnostics: vec![],
@@ -513,6 +516,7 @@ impl Server {
                 let Some(p) = extract::<DidChangeWatchedFilesParams>(note) else { return };
                 let mut reconfigure = false;
                 let open = self.docs.read().clone();
+                let mut disk = vec![];
                 for change in p.changes {
                     let Some(path) = uri_to_path(&change.uri) else { continue };
                     self.framework.changed(&path);
@@ -526,8 +530,11 @@ impl Server {
                     if open.get(&path).is_some() {
                         continue;
                     }
-                    let contents = if change.typ == FileChangeType::DELETED { None } else { std::fs::read(&path).ok() };
-                    self.indexer.send(Job::Change(path, contents));
+                    disk.push(path);
+                }
+                // One job, however many files, so the indexer applies them as one update.
+                if !disk.is_empty() {
+                    self.indexer.send(Job::Disk(disk));
                 }
                 // A new mago.toml, or packages installed or removed, change what's indexed and how.
                 if reconfigure {
@@ -557,24 +564,26 @@ impl Server {
                     self.indexer.send(Job::Build(Some(index_config(&self.root, &self.options))));
                 }
             }
-            notification::Initialized::METHOD => {
-                // Ask for changes the editor sees on disk, such as a branch switch or a `composer update`.
-                self.client.request::<request::RegisterCapability>(RegistrationParams {
-                    registrations: vec![Registration {
-                        id: "tusk-watch".into(),
-                        method: notification::DidChangeWatchedFiles::METHOD.into(),
-                        register_options: serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
-                            watchers: ["**/*.php", "**/.env", "lang/**/*.json", "public/**", "composer.lock", "mago.toml"]
-                                .into_iter()
-                                .map(|g| FileSystemWatcher { glob_pattern: GlobPattern::String(g.into()), kind: None })
-                                .collect(),
-                        })
-                        .ok(),
-                    }],
-                });
-            }
             _ => {}
         }
+    }
+
+    /// Asks for the changes the editor sees on disk, such as a branch switch or a `composer update`. Sent once the
+    /// editor is initialized, which `initialize_finish` waits for and takes, so the main loop never sees it.
+    fn watch_files(&self) {
+        self.client.request::<request::RegisterCapability>(RegistrationParams {
+            registrations: vec![Registration {
+                id: "tusk-watch".into(),
+                method: notification::DidChangeWatchedFiles::METHOD.into(),
+                register_options: serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
+                    watchers: ["**/*.php", "**/.env", "lang/**/*.json", "public/**", "composer.lock", "mago.toml"]
+                        .into_iter()
+                        .map(|g| FileSystemWatcher { glob_pattern: GlobPattern::String(g.into()), kind: None })
+                        .collect(),
+                })
+                .ok(),
+            }],
+        });
     }
 
     fn changed(&mut self, path: PathBuf, doc: Document) {
@@ -608,15 +617,25 @@ fn spawn_indexer(
                 let count = jobs.len() as u64;
                 let mut build: Option<Option<IndexConfig>> = None;
                 let mut changes: HashMap<PathBuf, Option<Vec<u8>>> = HashMap::new();
+                // The changed files to read from disk; a later edit's text wins.
+                let mut disk: HashSet<PathBuf> = HashSet::new();
                 for job in jobs {
                     match job {
                         Job::Build(config) => {
                             // A later build's configuration wins; one without keeps an earlier one's.
                             build = Some(config.or(build.flatten()));
                             changes.clear();
+                            disk.clear();
                         }
                         Job::Change(path, contents) => {
+                            disk.remove(&path);
                             changes.insert(path, contents);
+                        }
+                        Job::Disk(paths) => {
+                            for path in paths {
+                                changes.insert(path.clone(), None);
+                                disk.insert(path);
+                            }
                         }
                     }
                 }
@@ -625,7 +644,7 @@ fn spawn_indexer(
                         rebuild(&index, &docs, &client, config);
                     }
                     if !changes.is_empty() {
-                        index.write().update_many(changes.into_iter().collect());
+                        apply(&index, changes, &disk);
                     }
                 }));
                 if result.is_err() {
@@ -639,6 +658,21 @@ fn spawn_indexer(
             }
         })
         .expect("the indexer thread starts");
+}
+
+/// Applies a batch of changes. Files changed on disk are read in parallel before the index's lock is taken, and a
+/// library file the index hasn't loaded only changes what it declares (`Index::redeclare`), rather than loading in full.
+fn apply(index: &SharedIndex, changes: HashMap<PathBuf, Option<Vec<u8>>>, disk: &HashSet<PathBuf>) {
+    use rayon::prelude::*;
+    let changes: Vec<(PathBuf, Option<Vec<u8>>)> = crate::index::scan_pool().install(|| {
+        changes.into_par_iter().map(|(path, contents)| if disk.contains(&path) { (path.clone(), std::fs::read(&path).ok()) } else { (path, contents) }).collect()
+    });
+    let mut index = index.write();
+    let (declared, loaded): (Vec<_>, Vec<_>) = changes.into_iter().partition(|(path, _)| disk.contains(path) && index.is_unloaded_library(path));
+    index.redeclare(declared);
+    if !loaded.is_empty() {
+        index.update_many(loaded);
+    }
 }
 
 fn rebuild(index: &SharedIndex, docs: &Arc<RwLock<Documents>>, client: &Client, config: Option<IndexConfig>) {

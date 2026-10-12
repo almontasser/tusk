@@ -4,7 +4,9 @@
 //! into its first method a character at a time, asking for a completion at the cursor and a hover after each
 //! keystroke, saving after each pass. Prints how long the first answers took, how long indexing took, and the p50,
 //! p95, and slowest answers while typing. PHPStan is off. With `CACHE_DIR` set, the index keeps its cache there;
-//! without it, in a fresh folder.
+//! without it, in a fresh folder. With `SCAN=1`, a project scan for problems (`tusk/projectProblems`) starts with
+//! each pass; with `WATCHED=<n>`, after the first pass, `n` of `vendor`'s files are reported changed on disk, as a
+//! branch switch or `composer update` reports them.
 
 use std::time::{Duration, Instant};
 
@@ -16,6 +18,8 @@ struct Client {
     next: i32,
     started: Instant,
     indexed: Option<Duration>,
+    /// Requests sent without waiting, with when and what, until answered.
+    background: Vec<(RequestId, Instant, String)>,
 }
 
 impl Client {
@@ -33,9 +37,24 @@ impl Client {
             match self.conn.receiver.recv_timeout(Duration::from_secs(120)).expect("an answer") {
                 Message::Request(req) => self.conn.sender.send(Message::Response(Response::new_ok(req.id, Value::Null))).unwrap(),
                 Message::Response(r) if r.id == id => return (sent.elapsed(), r.response_result.unwrap_or(Value::Null)),
+                Message::Response(r) => self.answered(&r.id),
                 Message::Notification(n) => self.saw(&n),
-                _ => {}
             }
+        }
+    }
+
+    /// Sends a request without waiting for its answer, which is reported when it comes.
+    fn send(&mut self, method: &str, params: Value) {
+        let id = RequestId::from(self.next);
+        self.next += 1;
+        self.conn.sender.send(Message::Request(Request::new(id.clone(), method.into(), params))).unwrap();
+        self.background.push((id, Instant::now(), method.into()));
+    }
+
+    fn answered(&mut self, id: &RequestId) {
+        if let Some(i) = self.background.iter().position(|(b, ..)| b == id) {
+            let (_, sent, method) = self.background.remove(i);
+            println!("{method} answered after {:.0} ms", sent.elapsed().as_secs_f64() * 1000.0);
         }
     }
 
@@ -82,7 +101,7 @@ fn main() {
 
     let (server, conn) = Connection::memory();
     std::thread::spawn(move || tusk_lsp::server::run(server));
-    let mut c = Client { conn, next: 1, started: Instant::now(), indexed: None };
+    let mut c = Client { conn, next: 1, started: Instant::now(), indexed: None, background: vec![] };
     let root_uri = format!("file://{}", root.display());
     c.request("initialize", json!({ "processId": null, "rootUri": root_uri, "workspaceFolders": [{ "uri": root_uri, "name": "p" }], "capabilities": {}, "initializationOptions": { "cacheDir": cache, "phpstan": { "enabled": "off" } } }));
     c.notify("initialized", json!({}));
@@ -101,7 +120,24 @@ fn main() {
     let mut version = 1;
     let (mut completions, mut hovers) = (vec![], vec![]);
     let mut cursor = body;
-    for _ in 0..3 {
+    let scan = std::env::var_os("SCAN").is_some();
+    let watched: usize = std::env::var("WATCHED").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
+    for pass in 0..3 {
+        if scan {
+            c.send("tusk/projectProblems", json!({}));
+        }
+        if pass == 1 && watched > 0 {
+            let changes: Vec<Value> = ignore::WalkBuilder::new(root.join("vendor"))
+                .standard_filters(false)
+                .build()
+                .flatten()
+                .filter(|e| e.path().extension().is_some_and(|x| x == "php"))
+                .take(watched)
+                .map(|e| json!({ "uri": format!("file://{}", e.path().display()), "type": 2 }))
+                .collect();
+            println!("reporting {} files changed", changes.len());
+            c.notify("workspace/didChangeWatchedFiles", json!({ "changes": changes }));
+        }
         for ch in typed.chars() {
             text.insert(cursor, ch);
             let at = position(&text, cursor);
@@ -128,6 +164,9 @@ fn main() {
     }
     percentiles("completion", completions);
     percentiles("hover", hovers);
+    while !c.background.is_empty() {
+        c.request("textDocument/hover", json!({ "textDocument": doc, "position": position(&text, cursor) }));
+    }
     c.request("shutdown", Value::Null);
     c.notify("exit", Value::Null);
     if std::env::var_os("CACHE_DIR").is_none() {

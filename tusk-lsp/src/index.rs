@@ -777,14 +777,24 @@ impl Index {
         if changed {
             self.generation = next_generation();
         }
-        let arena = LocalArena::new();
+        // Each file is scanned in parallel first, as a branch switch changes many at once.
+        let (this, php_version) = (&*self, self.config.php_version);
+        let scanned: Vec<_> = scan_pool().install(|| changes
+            .par_iter()
+            .map(|(path, contents)| {
+                let Some(contents) = contents.as_ref().filter(|_| this.includes(path)) else { return (None, None) };
+                let file_type = this.file_type(path);
+                let project = file_type == FileType::Host;
+                let facts = if project { crate::framework::laravel::schema::scan_file(&this.config.root, path, contents) } else { None };
+                (facts, Some(scan(path, file_type, contents.clone(), php_version, &LocalArena::new(), project)))
+            })
+            .collect());
         let mut dirty = WordSet::default();
         let mut scans = vec![];
         let mut wanted: Vec<String> = vec![];
         let mut eloquent_changed = false;
-        for (path, contents) in changes {
+        for ((path, contents), (facts, scanned)) in changes.into_iter().zip(scanned) {
             let id = file_id(&path);
-            let facts = contents.as_deref().filter(|_| self.includes(&path) && self.file_type(&path) == FileType::Host).and_then(|c| crate::framework::laravel::schema::scan_file(&self.config.root, &path, c));
             let differs = match facts {
                 Some(facts) => self.eloquent_files.insert(path.clone(), facts.clone()).filter(|old| *old == facts).is_none(),
                 None => self.eloquent_files.remove(&path).is_some(),
@@ -805,15 +815,11 @@ impl Index {
             self.pest_own.remove(&id);
             self.validation.remove(&id);
             if path == self.config.root.join(PEST_FILE) {
-                self.pest_file = contents.clone();
+                self.pest_file = contents;
             }
-            let Some(contents) = contents else { continue };
-            if !self.includes(&path) {
-                continue;
-            }
+            let Some((meta, used, pest, rules, declared)) = scanned else { continue };
             let file_type = self.file_type(&path);
             let project = file_type == FileType::Host;
-            let (meta, used, pest, rules, declared) = scan(&path, file_type, contents, self.config.php_version, &arena, project);
             if !pest.is_empty() {
                 self.pest_own.insert(id, pest);
             }
@@ -845,6 +851,36 @@ impl Index {
             self.pest_uses = self.pest_file.as_deref().map(|c| pest_bindings(self, c)).unwrap_or_default();
         }
         self.sync_pest_classes();
+    }
+
+    /// Whether `path` is library code the index hasn't loaded, which a change on disk changes only what it declares.
+    pub fn is_unloaded_library(&self, path: &Path) -> bool {
+        self.file_type(path) != FileType::Host && !self.by_path.contains_key(path)
+    }
+
+    /// Replaces what library files the index hasn't loaded declare with what their new text declares, or forgets
+    /// them when they're gone, as the build reads them: by name, without loading them, so a `composer update` or a
+    /// branch switch that changes thousands of them doesn't load them all. Parsed in parallel.
+    pub fn redeclare(&mut self, files: Vec<(PathBuf, Option<Vec<u8>>)>) {
+        if files.is_empty() {
+            return;
+        }
+        let (this, php_version) = (&*self, self.config.php_version);
+        let parsed: Vec<(PathBuf, FileType, Option<Vec<Declared>>)> = scan_pool().install(|| files
+            .into_par_iter()
+            .map(|(path, contents)| {
+                let file_type = this.file_type(&path);
+                let declared = contents.filter(|_| this.includes(&path)).map(|c| scan(&path, file_type, c, php_version, &LocalArena::new(), false).4);
+                (path, file_type, declared)
+            })
+            .collect());
+        for (path, file_type, declared) in parsed {
+            self.forget_library_file(file_id(&path));
+            if let Some(declared) = declared {
+                self.add_library_file(path, file_type, declared);
+            }
+        }
+        self.generation = next_generation();
     }
 
     /// Moves a file's scan into the index, remembering what it declared.
@@ -1459,6 +1495,43 @@ mod tests {
         assert!(!idx.codebase.class_like_exists(b"Lib\\Unused"));
         idx.update(&root.join("app/B.php"), Some(b"<?php namespace App; function f() { return new \\Lib\\Unused; }".to_vec()));
         assert!(idx.codebase.class_like_exists(b"Lib\\Unused"));
+    }
+
+    /// A library file the index hasn't loaded that changes on disk changes only what it declares, as a `composer
+    /// update` changes thousands; one it has loaded goes through `update_many` and stays loaded.
+    #[test]
+    fn redeclares_library_files_it_hasnt_loaded() {
+        let mut idx = index(&[
+            ("vendor/lib/Used.php", "<?php namespace Lib; class Used {}"),
+            ("vendor/lib/Unused.php", "<?php namespace Lib; class Unused {}"),
+            ("app/A.php", "<?php namespace App; class A extends \\Lib\\Used {}"),
+        ]);
+        assert!(idx.is_unloaded_library(Path::new("/p/vendor/lib/Unused.php")));
+        assert!(idx.is_unloaded_library(Path::new("/p/vendor/lib/New.php")));
+        assert!(!idx.is_unloaded_library(Path::new("/p/vendor/lib/Used.php")) && !idx.is_unloaded_library(Path::new("/p/app/A.php")));
+        let loaded = idx.files.len();
+        idx.redeclare(vec![
+            (PathBuf::from("/p/vendor/lib/Unused.php"), Some(b"<?php namespace Lib; class Renamed {}".to_vec())),
+            (PathBuf::from("/p/vendor/lib/New.php"), Some(b"<?php namespace Lib; class Fresh {}".to_vec())),
+        ]);
+        assert!(idx.find_declared("Lib\\Unused").is_none());
+        assert!(idx.find_declared("Lib\\Renamed").is_some() && idx.find_declared("Lib\\Fresh").is_some());
+        assert!(!idx.codebase.class_like_exists(b"Lib\\Fresh"));
+        assert_eq!(idx.files.len(), loaded);
+        // Gone, it declares nothing.
+        idx.redeclare(vec![(PathBuf::from("/p/vendor/lib/New.php"), None)]);
+        assert!(idx.find_declared("Lib\\Fresh").is_none());
+    }
+
+    /// Several files change at once, as a branch switch changes them: each is scanned, and each one's symbols are
+    /// replaced.
+    #[test]
+    fn updates_many_files_at_once() {
+        let mut idx = index(&[("app/A.php", "<?php namespace App; class A {}"), ("app/B.php", "<?php namespace App; class B {}")]);
+        let changes = (0..50).map(|i| (PathBuf::from(format!("/p/app/C{i}.php")), Some(format!("<?php namespace App; class C{i} extends A {{}}").into_bytes())));
+        idx.update_many(changes.chain([(PathBuf::from("/p/app/B.php"), None), (PathBuf::from("/p/app/A.php"), Some(b"<?php namespace App; class A { function a() {} }".to_vec()))]).collect());
+        assert!(idx.codebase.method_exists(b"App\\C49", b"a"));
+        assert!(!idx.codebase.class_like_exists(b"App\\B"));
     }
 
     /// What an unchanged library file declares comes from the cache; a changed one, or a cache that can't be read,

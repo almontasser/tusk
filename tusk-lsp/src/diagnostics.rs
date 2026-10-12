@@ -121,24 +121,35 @@ pub fn check(snap: &Snapshot, doc: &Document) -> Vec<Diagnostic> {
 }
 
 pub fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
-    php_problems_in(&index.read(), doc)
+    let arena = LocalArena::new();
+    // Only the analysis needs the index; the linter and the rest run after the lock is released, as the next edit's
+    // index update waits for it.
+    let (parsed, issues, mago, root) = {
+        let index = index.read();
+        let (parsed, issues) = analysis_issues(&index, &arena, &doc.path, &doc.text);
+        (parsed, issues, index.config.mago.clone(), index.config.root.clone())
+    };
+    without_index(doc, &parsed, &issues, &mago, &root)
 }
 
 /// [`php_problems`] with the index already locked, for work that runs in parallel and mustn't take the lock.
 pub fn php_problems_in(index: &crate::index::Index, doc: &Document) -> Vec<Diagnostic> {
     let arena = LocalArena::new();
     let (parsed, issues) = analysis_issues(index, &arena, &doc.path, &doc.text);
-    let mago = index.config.mago.clone();
-    let rel = doc.path.strip_prefix(&index.config.root).unwrap_or(&doc.path).to_path_buf();
-    let out: Vec<Diagnostic> = issues.iter().filter_map(|i| to_diagnostic(doc, parsed.file.id, i, "mago")).collect();
+    without_index(doc, &parsed, &issues, &index.config.mago, &index.config.root)
+}
+
+/// The analysis issues as diagnostics, and the problems that need no index: the linter's and unused imports.
+fn without_index(doc: &Document, parsed: &Parsed<'_>, issues: &[Issue], mago: &crate::mago_config::MagoConfig, root: &std::path::Path) -> Vec<Diagnostic> {
+    let rel = doc.path.strip_prefix(root).unwrap_or(&doc.path);
+    let mut out: Vec<Diagnostic> = issues.iter().filter_map(|i| to_diagnostic(doc, parsed.file.id, i, "mago")).collect();
     if crate::analysis::too_complex(parsed.program) {
         return out;
     }
-    let mut out = out;
-    if mago.lints(&rel) {
-        out.extend(lint(doc, &rel, &mago));
+    if mago.lints(rel) {
+        out.extend(lint(doc, rel, mago));
     }
-    out.extend(crate::features::actions::organize::diagnostics(&parsed, doc));
+    out.extend(crate::features::actions::organize::diagnostics(parsed, doc));
     out
 }
 

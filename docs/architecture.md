@@ -976,7 +976,13 @@ files that another program creates, changes, or deletes, such as `php artisan
 make:model` or a `git checkout`. The server indexes PHP files it doesn't have
 open, forgets cached Laravel and Filament facts that depend on the paths, and
 indexes the project again with its configuration read again when
-`composer.lock` or `mago.toml` changes.
+`composer.lock` or `mago.toml` changes. The editor sends only what the
+server's watchers match, which the server registers with
+`client/registerCapability` once initialization finishes (`watch_files` in
+`server.rs`). `lsp-server`'s `initialize_finish` takes the editor's
+`initialized` notification itself, so the main loop, which sent the
+registration when it saw one, never did: once the editor sent only what
+watchers match, the server heard of no change on disk.
 
 ### Pest in diagnostics
 
@@ -6275,7 +6281,15 @@ returns.
 - **Main loop:** applies document changes at once and never waits on
   analysis.
 - **Indexer thread:** applies index updates, merging a burst of edits into
-  one.
+  one. Files changed on disk arrive as one job per notification
+  (`Job::Disk`) and are read on the indexer, in parallel, before it takes the
+  index's lock, rather than on the main loop. A library file the index hasn't
+  loaded only changes what it declares (`Index::redeclare`), as the build
+  reads it, and the files an update scans are scanned in parallel. Reporting
+  10,000 of `vendor`'s files changed blocked the main loop for 0.23 s, loaded
+  9,200 files the project doesn't reach, and held the next completion for
+  0.78 s. Now the main loop doesn't wait, nothing more is loaded, and the
+  completion waits about 0.27 s.
 - **Request pool:** each request runs on the pool once the index has every
   edit made before it (`Indexer::ticket`), so it sees its own file's latest
   symbols. The outline, folding ranges, and selection ranges read only the
@@ -6295,17 +6309,33 @@ returns.
   moves, and project problems read files in parallel on the scan pool. That
   work never takes the index's lock: the request takes it once and passes the
   index down (`php_problems_in`).
+- **Project problems in rounds:** `tusk/projectProblems` takes the lock for a
+  round of files at a time, one per scan thread, largest files first, so the
+  files of a round take about as long as each other. Edits, and the requests
+  that wait for them, get in between rounds; each file is checked against the
+  index as it is when its round starts. Holding the lock for the whole scan
+  held every keystroke for up to the scan's length (0.3 to 0.9 s here); now
+  the longest wait is one round, about the slowest file's check (0.1 s for a
+  test file with 100 tests). The scan takes longer while you type, about 1 s
+  rather than 0.4 s, as it gives way to edits.
 - **Diagnostics thread:** checks an edited document as soon as the index has
   its change, and the other open documents once edits pause for 600 ms,
   since they may depend on it. A check holds the index's read lock, and the
   next edit's update waits for it, so it runs no PHP under the lock (see
-  "Scripts outside the index's lock").
+  "Scripts outside the index's lock"), and the linter and the unused-import
+  check run after Mago's analysis releases it. What's left under the lock is
+  the analysis (4 ms for a 750-line controller, 12 ms for a 1,400-line
+  service) and the framework's checks (7 and 16 ms), which analyze the file
+  again with the requests' settings.
 - **Latency:** `examples/latency.rs` opens a file right after `initialize`,
   then types three lines into its first method a character at a time,
   asking for a completion and a hover after each keystroke and saving after
   each pass. On a Laravel and Filament app (26,000 PHP files, warm cache),
   completion takes 9 ms at the median, 20 ms at p95, and at most 65 ms, where
   it took up to 4.7 s with PHP run under the index's lock; hover takes 4 ms.
+  With `SCAN=1`, a project scan starts with each pass (completion at most
+  about 100 ms); with `WATCHED=<n>`, `n` of `vendor`'s files are reported
+  changed after the first pass.
 - **Stacks:** threads get 64 MB stacks, because Mago's parser and analyzer
   recurse once per level of nesting. So do the threads that scan files for the
   index (`scan_pool`); rayon's global pool has 2 MB.

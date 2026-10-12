@@ -52,9 +52,9 @@ pub fn project_problems(snap: &Snapshot, params: Value) -> Result<Value, String>
     // Once, before the index's lock, since it may run PHP.
     let components = crate::framework::laravel::blade_components(&snap.framework);
     let components = components.as_deref();
-    let index = snap.index.read();
-    let paths: Vec<PathBuf> = index.project_files().map(|p| p.to_path_buf()).chain(views).collect();
-    let index = &*index;
+    let mut paths: Vec<PathBuf> = snap.index.read().project_files().map(|p| p.to_path_buf()).chain(views).collect();
+    // Largest first, so the files of a round below take about as long as each other, and few wait on its slowest.
+    paths.sort_by_cached_key(|p| std::cmp::Reverse(std::fs::metadata(p).map_or(0, |m| m.len())));
     let token = params.get("workDoneToken").and_then(Value::as_str).map(str::to_owned);
     let progress = |value: WorkDoneProgress| {
         if let (Some(client), Some(token)) = (&snap.client, &token) {
@@ -65,30 +65,43 @@ pub fn project_problems(snap: &Snapshot, params: Value) -> Result<Value, String>
     progress(WorkDoneProgress::Begin(WorkDoneProgressBegin { title: "Checking the project".into(), cancellable: Some(true), message: Some(format!("0/{total} files")), percentage: Some(0) }));
     let done = AtomicUsize::new(0);
     let last = Mutex::new(Instant::now());
-    let results: BTreeMap<String, Vec<Diagnostic>> = crate::index::scan_pool().install(|| paths
-        .into_par_iter()
-        .filter_map(|path| {
-            if snap.is_cancelled() {
-                return None;
-            }
-            let found = (|| {
-                let text = snap.read(&path)?;
-                let blade = path.to_string_lossy().ends_with(".blade.php");
-                let doc = Document::new(path_to_uri(&path), path.clone(), if blade { "blade" } else { "php" }.into(), 0, text);
-                let check = || if blade { crate::diagnostics::blade_problems_in(index, &doc, &|p| snap.read(p), components) } else { crate::diagnostics::php_problems_in(index, &doc) };
-                let problems = std::panic::catch_unwind(std::panic::AssertUnwindSafe(check)).ok()?;
-                let rel = path.strip_prefix(&snap.root).ok()?.to_string_lossy().into_owned();
-                (!problems.is_empty()).then_some((rel, problems))
-            })();
-            let n = done.fetch_add(1, Ordering::Relaxed) + 1;
-            let mut last = last.lock();
-            if last.elapsed() > Duration::from_millis(150) {
-                *last = Instant::now();
-                progress(WorkDoneProgress::Report(WorkDoneProgressReport { cancellable: Some(true), message: Some(format!("{n}/{total} files")), percentage: Some((n * 100 / total.max(1)) as u32) }));
-            }
-            found
-        })
-        .collect());
+    let mut results: BTreeMap<String, Vec<Diagnostic>> = BTreeMap::new();
+    // The index's lock is held for a round of files at a time, one per scan thread, not the whole scan, so edits get
+    // in between rounds, and so do the requests after them, which wait for the index to have them. Each file is
+    // checked against the index as it is when its round starts. Work on the scan pool never waits on the lock, so
+    // it's taken here.
+    let round = crate::index::scan_pool().current_num_threads();
+    for paths in paths.chunks(round) {
+        if snap.is_cancelled() {
+            break;
+        }
+        let guard = snap.index.read();
+        let index = &*guard;
+        results.extend(crate::index::scan_pool().install(|| paths
+            .par_iter()
+            .filter_map(|path| {
+                if snap.is_cancelled() {
+                    return None;
+                }
+                let found = (|| {
+                    let text = snap.read(path)?;
+                    let blade = path.to_string_lossy().ends_with(".blade.php");
+                    let doc = Document::new(path_to_uri(path), path.clone(), if blade { "blade" } else { "php" }.into(), 0, text);
+                    let check = || if blade { crate::diagnostics::blade_problems_in(index, &doc, &|p| snap.read(p), components) } else { crate::diagnostics::php_problems_in(index, &doc) };
+                    let problems = std::panic::catch_unwind(std::panic::AssertUnwindSafe(check)).ok()?;
+                    let rel = path.strip_prefix(&snap.root).ok()?.to_string_lossy().into_owned();
+                    (!problems.is_empty()).then_some((rel, problems))
+                })();
+                let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+                let mut last = last.lock();
+                if last.elapsed() > Duration::from_millis(150) {
+                    *last = Instant::now();
+                    progress(WorkDoneProgress::Report(WorkDoneProgressReport { cancellable: Some(true), message: Some(format!("{n}/{total} files")), percentage: Some((n * 100 / total.max(1)) as u32) }));
+                }
+                found
+            })
+            .collect::<Vec<_>>()));
+    }
     progress(WorkDoneProgress::End(WorkDoneProgressEnd { message: None }));
     if snap.is_cancelled() {
         return Err(crate::server::CANCELLED.into());
