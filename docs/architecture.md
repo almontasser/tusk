@@ -6213,10 +6213,14 @@ returns.
 - **`parent` in traits:** PHP resolves it to the parent of the class that uses
   the trait, but Mago only accepts it with `@phpstan-require-extends` and
   otherwise reports `invalid-parent-type`. After each populate, the index
-  (`infer_trait_parents`) gives a trait without one the parent that every
-  class using it shares, so `parent::` calls get that parent's types. When the
-  classes disagree, or nothing uses the trait yet, `parent` stays untyped and
-  the diagnostics drop the report.
+  (`infer_trait_parents`) gives a trait without one the parents of the classes
+  that use it, as PhpStorm resolves it. Mago reads several as the trait
+  extending them all, so `parent::x()` finds `x` on any of them and types it
+  as the union of their return types; a member none of them has is still
+  reported. The diagnostics drop the `missing-required-parent` each class gets
+  for not extending the others. When a class that uses the trait has no
+  parent, or nothing uses it yet, `parent` stays untyped and the diagnostics
+  drop the `invalid-parent-type`.
 - **Changes:** each file keeps the names it declared. A change removes the
   ones the index still has from that file (two files can declare the same
   class, and only one wins the merge), scans the new text, and repopulates

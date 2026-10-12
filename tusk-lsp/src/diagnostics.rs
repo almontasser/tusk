@@ -153,7 +153,7 @@ fn analysis_issues<'a>(index: &crate::index::Index, arena: &'a LocalArena, path:
     let mago = &index.config.mago;
     let rel = path.strip_prefix(&index.config.root).unwrap_or(path);
     let analysis = analyze_with(&parsed, arena, index, mago.analyzer_settings(index.config.php_version));
-    issues.extend(analysis.issues.into_iter().filter(|i| mago.reports_analysis(rel, i.code.as_deref()) && !parent_in_trait(i, text)));
+    issues.extend(analysis.issues.into_iter().filter(|i| mago.reports_analysis(rel, i.code.as_deref()) && !parent_in_trait(i, text) && !inferred_requirement(i, index)));
     (parsed, issues)
 }
 
@@ -163,6 +163,15 @@ fn parent_in_trait(issue: &Issue, text: &str) -> bool {
     issue.code.as_deref() == Some("invalid-parent-type")
         && issue.annotations.iter().any(|a| {
             a.kind == AnnotationKind::Secondary && text.get(..a.span.start.offset as usize).is_some_and(|t| t.trim_end().to_ascii_lowercase().ends_with("trait"))
+        })
+}
+
+/// Mago reports a class that uses a trait without extending a parent the trait requires, but the index makes a
+/// trait require the parents of all the classes that use it, which no one class extends.
+fn inferred_requirement(issue: &Issue, index: &crate::index::Index) -> bool {
+    issue.code.as_deref() == Some("missing-required-parent")
+        && issue.annotations.iter().filter_map(|a| a.message.as_deref()).any(|m| {
+            m.strip_prefix("...because the trait `").and_then(|m| m.strip_suffix("` requires it")).is_some_and(|t| index.inferred_trait_parents(t))
         })
 }
 
@@ -313,7 +322,15 @@ mod tests {
         let t = "trait T {\n    public function x(): string { return parent::boot(); }\n}\n";
         // Typed from the parent the classes share.
         assert_eq!(codes(&format!("{base}{t}class C extends Base {{ use T; }}\n")), vec!["invalid-return-statement"]);
-        // Unknown without users, or with users that disagree, but not reported.
+        // With several parents, a member any of them has, typed as any of theirs, and no class reported for not
+        // extending them all.
+        let several = |ret: &str, call: &str| {
+            codes(&format!("<?php\nclass A {{ public function boot(): int {{ return 1; }} public function only(): void {{}} }}\nclass B {{ public function boot(): string {{ return ''; }} }}\ntrait T {{\n    public function x(): {ret} {{ {call}; return parent::boot(); }}\n}}\nclass C extends A {{ use T; }}\nclass D extends B {{ use T; }}\n"))
+        };
+        assert_eq!(several("int|string", "parent::only()"), Vec::<String>::new());
+        assert_eq!(several("int", "parent::only()"), vec!["invalid-return-statement"]);
+        assert_eq!(several("int|string", "parent::none()"), vec!["non-existent-method"]);
+        // Unknown without users, or with a user without a parent, but not reported.
         assert!(!codes(&format!("{base}{t}")).contains(&"invalid-parent-type".into()));
         assert!(!codes(&format!("{base}{t}class C extends Base {{ use T; }}\nclass D {{ use T; }}\n")).contains(&"invalid-parent-type".into()));
         // Still reported in a class without a parent.

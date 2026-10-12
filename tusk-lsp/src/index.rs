@@ -174,8 +174,8 @@ pub struct Index {
     pest_own: HashMap<FileId, Vec<String>>,
     /// The classes made for the test files bound to traits, by test case and traits; see [`Index::sync_pest_classes`].
     pest_classes: Vec<((String, Vec<String>), Word)>,
-    /// The traits given the parent their classes share, and that parent; see [`Index::infer_trait_parents`].
-    trait_parents: Vec<(Word, Word)>,
+    /// The traits given the parents of the classes that use them, and those parents; see [`Index::infer_trait_parents`].
+    trait_parents: Vec<(Word, WordSet)>,
     /// The validation rules each project file's classes declare, for files that declare any.
     pub validation: HashMap<FileId, Rules>,
     /// Changes with each build and each change to the project's code, and is never the same for two indexes, so
@@ -907,37 +907,47 @@ impl Index {
     }
 
     /// PHP resolves `parent` in a trait to the parent of the class that uses it, which Mago only knows from a
-    /// `@phpstan-require-extends`, reporting `parent` as invalid without one. A trait without one gets the parent
-    /// every class that uses it shares, so `parent::` calls have their types.
+    /// `@phpstan-require-extends`, reporting `parent` as invalid without one. A trait without one gets the parents
+    /// of the classes that use it, as PhpStorm resolves it, so `parent::` calls have their types. With several,
+    /// Mago takes the trait to extend them all, so a member any of them has is found.
     fn infer_trait_parents(&mut self) {
         let key = |w: &Word| mago_word::word(w.as_str_lossy().to_ascii_lowercase().as_bytes());
-        // Taken out first: what the classes share may have changed. A trait scanned again has none.
-        for (name, parent) in std::mem::take(&mut self.trait_parents) {
+        // Taken out first: the classes may have changed. A trait scanned again has none.
+        for (name, parents) in std::mem::take(&mut self.trait_parents) {
             if let Some(meta) = self.codebase.class_likes.get_mut(&name)
-                && meta.require_extends.len() == 1
-                && meta.require_extends.contains(&parent)
+                && meta.require_extends == parents
             {
                 meta.require_extends.clear();
             }
         }
-        // Each used trait's shared parent, or `None` once two classes disagree or one has no parent.
-        let mut shared: HashMap<Word, Option<Word>> = HashMap::new();
+        // Each used trait's parents, or `None` once a class that uses it has no parent, where `parent` fails.
+        let mut parents: HashMap<Word, Option<WordSet>> = HashMap::new();
         for meta in self.codebase.class_likes.values().filter(|m| m.kind == SymbolKind::Class) {
             let parent = meta.direct_parent_class.and_then(|p| self.codebase.get_class_like(p.as_bytes())).map(|p| p.name);
             for t in &meta.used_traits {
-                shared.entry(key(t)).and_modify(|s| if *s != parent { *s = None }).or_insert(parent);
+                let set = parents.entry(key(t)).or_insert_with(|| Some(WordSet::default()));
+                match (set.as_mut(), parent) {
+                    (Some(set), Some(parent)) => _ = set.insert(parent),
+                    _ => *set = None,
+                }
             }
         }
-        for (name, parent) in shared {
-            let Some(parent) = parent else { continue };
+        for (name, set) in parents {
+            let Some(set) = set else { continue };
             if let Some(meta) = self.codebase.class_likes.get_mut(&name)
                 && meta.kind == SymbolKind::Trait
                 && meta.require_extends.is_empty()
             {
-                meta.require_extends.insert(parent);
-                self.trait_parents.push((name, parent));
+                meta.require_extends = set.clone();
+                self.trait_parents.push((name, set));
             }
         }
+    }
+
+    /// Whether the index gave `name`, a trait, the parents of the classes that use it.
+    pub fn inferred_trait_parents(&self, name: &str) -> bool {
+        let name = mago_word::word(name.to_ascii_lowercase().as_bytes());
+        self.trait_parents.iter().any(|(t, _)| *t == name)
     }
 
     /// Pest runs each test closure as a method of a test case. Its functions declare PHPUnit's `TestCase` as the
