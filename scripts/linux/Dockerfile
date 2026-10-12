@@ -10,7 +10,7 @@ ARG NODE=24.19.0
 RUN curl -fsSL "https://nodejs.org/dist/v$NODE/node-v$NODE-linux-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/').tar.xz" \
       | tar -xJ -C /usr/local --strip-components 1 \
     && npm install -g pnpm@11
-ARG RUST=1.97.1
+ARG RUST=1.99.0
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "$RUST"
 ENV PATH=/root/.cargo/bin:$PATH
 # The AppImage tools are AppImages themselves, and a container has no FUSE to mount them.
