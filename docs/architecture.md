@@ -41,7 +41,7 @@ one client per server, and Monaco merges their results.
 | `read_dir` | Lists one folder, folders first, sorted by name without regard to case. Hides `.git` and `.DS_Store`. |
 | `read_file` | Returns a file as UTF-8 text. |
 | `write_file` | Replaces a file's contents through a temporary file beside it (`write_atomic`), renamed over it, so a crash mid-save leaves the old file whole. Each write's temporary file has its own name (`.name.<pid>-<n>.tusk-save`), and the watcher leaves those out of `fs-change`. |
-| `watch` | Watches a folder recursively and emits `fs-change` with the changed paths, gathered for 50 ms and without duplicates. |
+| `watch` | Watches a folder recursively and emits `fs-change` with the changed paths, gathered for 50 ms and without duplicates. It leaves out `.git/objects`, which changes only with git's index or refs, so `git add` of a large folder doesn't report thousands of objects. |
 | `paths_exist` | Whether each of a batch of paths exists, in one call. |
 
 ### File tree
@@ -50,7 +50,10 @@ The tree loads each folder only when you expand it, so large folders such as
 `vendor` and `node_modules` cost nothing until opened. The frontend keeps a map
 from each rendered folder to its list element. When `fs-change` arrives, it
 re-lists only the parent folders of the changed paths, and redraws one only if
-its entries changed (`listings`), so saving a file redraws nothing.
+its entries changed (`listings`), so saving a file redraws nothing. That redraw
+keeps the rows still there, with their open folders and listings, so a file
+added to the project's root doesn't empty, re-list, and redraw every open folder
+below it.
 
 ### Tabs and models
 
@@ -291,6 +294,14 @@ closed. Inside a submenu, a label loses the submenu's prefix, so "HTTP Client:
 Import…" reads "Import…". A label with no matching action logs an error and is
 left out.
 
+Each item is a call that Rust runs on the main thread, and the menu has
+hundreds, so building it at launch held up every other call for about 270 ms,
+including the settings and the project's first reads. On a Mac the first build
+waits until the last project has opened (`menuShown`), and Tauri's default menu,
+with Copy, Paste, and Quit, shows until then. On Windows and Linux the menu bar
+takes room in the window, so it's built at launch, rather than move the page
+down after the project shows.
+
 The web view gets a key before the menu does, and the menu gets it only when
 the page doesn't call `preventDefault`. That's why ⌘W closes a tab and not the
 window. An editor-only action, or one with `when`, passes keys on in some cases,
@@ -330,8 +341,10 @@ its row (on the left when there's no room), and ← or Escape closes it.
 `src/editorconfig.ts` parses `.editorconfig` files and turns their section
 globs into regexes (`*`, `**`, `?`, `[...]`, `{a,b}`, and `{1..3}`). A glob
 without a slash matches the file name in any folder. For a file, `main.ts`
-reads the `.editorconfig` of each folder from the project root down, cached
-per folder, and applies the sections in order, so closer files and later
+reads the `.editorconfig` of each folder from the project root down, all at
+once and cached per folder (`editorConfigFor` in `projectfiles.ts`), so opening
+a file deep in `vendor` waits on one read, not one per folder. It applies the
+sections in order, so closer files and later
 sections win, and `root = true` ignores the files above. A new model gets
 `insertSpaces`, `tabSize`, and `indentSize` from them. Saving converts line
 endings to `end_of_line` (`pushEOL`), trims trailing whitespace, and fixes the
@@ -375,6 +388,13 @@ the rest of the editor (git, search, language servers) sees text.
 The frontend batches `fs-change` events for 150 ms. For each changed file that
 is open and has no unsaved edits, it reloads the file from disk. It never
 overwrites unsaved edits.
+
+The 150 ms wait restarts with each event, so a `composer install` or a branch
+switch is handled once it pauses, as one batch of up to tens of thousands of
+paths. Everything a batch does is linear in its paths and cheap per path: open
+files are found from Monaco's file models rather than a URI per path, the
+tree's hidden and excluded patterns and the language servers' watcher globs are
+compiled once, and the Commit view redraws only while it shows.
 
 ## PHP intelligence (milestone 2)
 
@@ -3351,7 +3371,10 @@ output, and `src/gitparse.test.ts` covers it:
 The app reruns `git status` when you open a folder, show the commit view, or
 change git state, and after each batch of file watcher events. The watcher
 also reports changes inside `.git`, so commits and checkouts made in a
-terminal show up too.
+terminal show up too. One `git status` runs at a time, and calls made
+meanwhile share one follow-up run. The Commit view redraws after a refresh
+only while it shows, and draws from the last status when you show it, since a
+branch switch can list thousands of files and each watcher batch refreshes.
 
 ### Commit view and diffs
 
@@ -6962,7 +6985,37 @@ measurement.
   saved tabs are read at once, the language servers' setup checks run in one
   `Promise.all`, and the servers start before saved terminals reopen. Settings
   load before the project opens, so the servers start once, with the right
-  settings.
+  settings. On a Mac the menu bar is built after the project opens, since its
+  hundreds of main-thread calls held everything else up.
+- **A watcher batch costs little per path.** A branch switch or a
+  `composer install` reports tens of thousands of paths in one batch. Look
+  open files up from the models, compile patterns once, keep tree rows that
+  didn't change, and draw views that are hidden only when they show.
+
+### Measuring startup and watcher storms
+
+Measure a production bundle (`pnpm vite build`, then `pnpm vite preview` on the
+port a separate dev instance loads), since the development server loads each
+module on its own. `performance.mark` calls around `openFolderNow`'s steps
+time startup. The webview's own `invoke` can't be wrapped, so to time each
+command, build with a Vite alias that points `@tauri-apps/api/core` at a file
+that re-exports it with a timing `invoke`. For watcher storms, copy a Laravel
+project with its `vendor` folder, then `cp -R vendor vendor2` and remove it.
+Machine load from other builds changes absolute times by 2 to 5 times, so
+compare runs taken together.
+
+| 2026-10-12, Laravel project, 20 saved tabs, 50 open folders | Before | After |
+| --- | --- | --- |
+| Settings loaded, from the end of `main.ts` | 290 ms | 50 ms |
+| `local_domains_runnable` at launch (async, waiting on the main thread) | 269 ms | 18 ms |
+| Tree hidden and excluded checks, 22,781 paths (Node) | 66 ms | 28 ms |
+| Tailwind's watcher globs, 22,781 paths (Node) | 165 ms | 14 ms |
+| Finding the open files in an 18,478-path batch | 54 ms, twice | under 1 ms |
+| Folders re-listed when a file is added to the root | every open folder (50) | 1 |
+
+The app's own modules, including the database, deployment, HTTP client, and
+Filament designers, evaluate in about 11 ms at launch, against about 50 ms for
+Monaco, so loading more of them on first use wouldn't be noticed.
 
 ### Measuring indexing
 
@@ -9644,3 +9697,39 @@ user code:
   `$_SERVER['HTTPS']`, the scheme, and the port instead, so `url()` and
   `request()->isSecure()` work without changes, and the proxy stays a byte
   copy.
+
+### 2026-10-12: Startup and watcher storms off the main thread
+
+- The menu bar's first build on a Mac waits until the project has opened. Its
+  hundreds of `plugin:menu` calls each run on the main thread, and fired at
+  launch they held up settings, the theme folder's listing, and the project's
+  first reads by about 270 ms. The default menu Tauri shows meanwhile has the
+  editing and quit items. Windows and Linux keep the launch-time build, since
+  their menu bar would push the page down later.
+- The watcher leaves out `.git/objects`. Nothing reads those paths, and the
+  index or ref change that goes with them still refreshes git.
+- A watcher batch finds open files from Monaco's file models, keyed by
+  `fsPath` as the rest of `main.ts` keys tabs, instead of building a URI per
+  changed path twice.
+- `listed` in `treefilter.ts` and `covers` in `indexexclude.ts` compile each
+  pattern once. They ran for every tree row drawn and every path a batch
+  passed to local history, compiling every pattern each time.
+- `globToRegex` stripped the "any folder" prefix from each `{a,b}` part with a
+  pattern that never matched, because `RegExp.source` writes `/` as `\/`. The
+  nested `(?:.*\/)?` groups let `*.{css,scss}` match `a.b/css` and made
+  Tailwind's watcher globs backtrack, about 7 µs a path.
+- A tree redraw for watcher events reuses the rows still there. It used to
+  rebuild the folder and every open folder below it, emptying them until each
+  `read_dir` came back, so the tree flickered and its scroll position jumped.
+- The Commit view no longer redraws on refreshes while hidden, so a branch
+  switch with thousands of changed files doesn't build them on every batch.
+  `showView("commit")` draws it from the last status, then refreshes.
+- `editorConfigFor` asks for every folder's `.editorconfig` at once instead of
+  awaiting each in turn.
+- Deployment's deleted-folder check looks up each path's parents in a set,
+  instead of comparing every pair of deleted paths.
+- Not changed, with measurements: loading the database, deployment, HTTP
+  client, or Filament modules on first use (about 11 ms of module evaluation in
+  all), creating saved tabs' models lazily (20 tabs restore in about 70 ms,
+  mostly waiting on reads), and switching tabs (about 9 ms, most of it Monaco's
+  `setModel`).

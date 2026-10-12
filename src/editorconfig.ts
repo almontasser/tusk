@@ -43,9 +43,11 @@ export function globToRegex(glob: string): RegExp {
       const end = pattern.indexOf("}", i);
       const body = pattern.slice(i + 1, end);
       const range = body.match(/^(-?\d+)\.\.(-?\d+)$/);
+      // Each part drops the "any folder" prefix a glob without a slash gets, which `source` writes as `(?:.*\/)?`.
+      // Left in, it matched across folders and made the regex backtrack on every path the watcher reports.
       out += range
         ? `(?:${Array.from({ length: Math.abs(+range[2] - +range[1]) + 1 }, (_, k) => Math.min(+range[1], +range[2]) + k).join("|")})`
-        : `(?:${body.split(",").map((part) => globToRegex(part.includes("/") ? `/${part}` : part).source.slice(1, -1).replace(/^\(\?:\.\*\/\)\?/, "")).join("|")})`;
+        : `(?:${body.split(",").map((part) => globToRegex(part.includes("/") ? `/${part}` : part).source.slice(1, -1).replace(/^\(\?:\.\*\\?\/\)\?/, "")).join("|")})`;
       i = end;
     } else if (c === "[") {
       const end = pattern.indexOf("]", i);

@@ -38,6 +38,8 @@ test("matches globs as EditorConfig does", () => {
   assert.ok(!m("/docker-compose.yml", "sub/docker-compose.yml"));
   assert.ok(m("lib/**.js", "lib/a/b.js"));
   assert.ok(m("{package.json,*.yml}", "package.json"));
+  assert.ok(!m("*.{css,scss}", "a.b/css"));
+  assert.equal(globToRegex("**/*.{css,scss}").source, String.raw`^(?:.*\/)?[^/]*\.(?:css|scss)$`);
   assert.ok(m("file{1..3}.txt", "file2.txt"));
   assert.ok(!m("file{1..3}.txt", "file4.txt"));
   assert.ok(m("[Mm]akefile", "Makefile"));

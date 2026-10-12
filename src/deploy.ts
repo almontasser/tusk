@@ -496,9 +496,15 @@ export async function filesDeleted(paths: string[]) {
   gone = gone.filter((_, i) => !excluded[i]);
   // Counted before a folder takes the place of its files, so deleting a big folder still asks.
   const count = gone.length;
-  const folder = gone.some((p) => gone.some((o) => o !== p && o.remote.startsWith(`${p.remote}/`)));
+  // Whether a folder above it went too, looked up by its parents: a branch switch can delete thousands of files.
+  const goneRemote = new Set(gone.map((p) => p.remote));
+  const inGoneFolder = (p: Placed) => {
+    for (let r = p.remote; r.includes("/"); ) if (goneRemote.has((r = r.slice(0, r.lastIndexOf("/"))))) return true;
+    return false;
+  };
+  const folder = gone.some(inGoneFolder);
   // A folder deleted with its files: deleting the folder deletes them.
-  gone = gone.filter((p) => !gone.some((o) => o !== p && p.remote.startsWith(`${o.remote}/`)));
+  gone = gone.filter((p) => !inGoneFolder(p));
   if (!gone.length) return;
   const added = placed.filter((_, i) => exists[i]).map((p) => p.local);
   if (added.length) void upload(added, s, { quiet: true });
