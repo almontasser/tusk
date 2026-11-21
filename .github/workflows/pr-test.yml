@@ -1,0 +1,17 @@
+name: PR panel test
+on: pull_request
+jobs:
+  fails:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: |
+          echo "There was 1 failure:"
+          echo "1) GreetTest::testGreet"
+          echo "$GITHUB_WORKSPACE/pr-test.php:6"
+          exit 1
+  passes:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
