@@ -342,7 +342,7 @@ export async function renderPullRequest(number: number) {
       list.append(head);
       for (const c of pendingComments) {
         const li = el("li");
-        li.append(icon("file-code"), el("span", "name", ltr(`${c.path}:${c.start_line ? `${c.start_line}–` : ""}${c.line}`)), el("span", "muted", c.body.split("\n")[0]));
+        li.append(icon("file-code"), el("span", "name", ltr(c.line === null ? c.path : `${c.path}:${c.start_line ? `${c.start_line}–` : ""}${c.line}`)), el("span", "muted", c.body.split("\n")[0]));
         li.onclick = () => showFileDiff(pr, c.path, threads, c);
         const remove = el("button", "icon-button codicon codicon-trash");
         remove.title = "Delete this pending comment";

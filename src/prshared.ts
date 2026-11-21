@@ -36,8 +36,11 @@ export type Details = ListedPullRequest & {
   closingIssuesReferences: { number: number; url: string; repository: { name: string; owner: { login: string } } }[];
 };
 
-/** A comment on a line of the diff. `line` is null when the code it was on has changed since. */
-export type ReviewComment = { id: number; path: string; line: number | null; start_line: number | null; side: "LEFT" | "RIGHT"; body: string; user: string; in_reply_to_id: number | null; created_at: string; diff_hunk?: string };
+/**
+ * A comment on a line of the diff, or on the whole file when `subject_type` is "file". `line` is null when the code
+ * it was on has changed since.
+ */
+export type ReviewComment = { id: number; path: string; line: number | null; start_line: number | null; side: "LEFT" | "RIGHT"; body: string; user: string; in_reply_to_id: number | null; created_at: string; diff_hunk?: string; subject_type?: "line" | "file" };
 /** A line comment and its replies. `node` is the thread's GraphQL ID, for resolving it. */
 export type Thread = ReviewComment & { comments: ReviewComment[]; node?: string; resolved?: boolean };
 
@@ -50,6 +53,8 @@ export type Host = {
   replaceLines(path: string, start: number, end: number, expected: string, text: string): Promise<boolean>;
   /** Moves the tab in front to the next editor pane, splitting the editor right when there's only one. */
   moveTabToNextPane?(): void;
+  /** Saves a file's editor tab, if it has unsaved changes. False when it still has some, such as after Cancel. */
+  save(path: string): Promise<boolean>;
 };
 
 export const $ = (id: string) => document.getElementById(id)!;

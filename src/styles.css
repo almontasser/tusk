@@ -3293,3 +3293,12 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .pr-merge-dialog label.field textarea { font: 12.5px var(--mono); resize: vertical; min-height: 120px; }
 .pr-rerequest { margin-left: 2px; font-size: 12px; opacity: 0.6; }
 .pr-rerequest:hover, .pr-rerequest:focus-visible { opacity: 1; }
+
+/* Pull requests: diff commenting */
+.pr-diff-extras { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; white-space: nowrap; }
+.pr-diff-extras > button { height: 24px; padding: 0 8px; }
+.pr-diff-extras .diff-viewed { margin-left: 0; }
+.pr-no-add-glyph { cursor: not-allowed; }
+.pr-drag-range { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.pr-suggestion-pick { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.pr-comment-form textarea { resize: vertical; }

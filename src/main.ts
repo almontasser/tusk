@@ -2491,6 +2491,11 @@ initPullRequests({
     editor.revealLineInCenter(start);
     return true;
   },
+  async save(path) {
+    await saveFile(path);
+    const tab = tabs.get(path);
+    return !!tab && !isDirty(tab);
+  },
 });
 initDatabase({ root: () => root, openFile, status });
 initDeployment({

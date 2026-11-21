@@ -422,20 +422,37 @@ Deleting asks you to click **Delete** again to confirm.
 To comment on code in the diff:
 
 1. Point at a line, on the new side or the old side, and click the blue **+**
-   in its gutter. To comment on several lines, select them first, then click
-   the **+** of one of them. You can also select the lines and click **Comment
-   on Line** in the diff's header.
+   in its gutter. To comment on several lines, press the **+** and drag across
+   them, or select them first and click the **+** of one of them. You can also
+   select the lines and click **Comment on Line** in the diff's header.
 2. A comment box opens under the line.
-3. Write the comment (Markdown, on as many lines as you like), then click
-   **Add to Review** to keep it for your review, or **Comment Now** to post it
-   at once. ⌘⏎ adds it to the review, and Escape closes the box. On the new
-   side, **Suggest Change** puts the selected lines in a `suggestion` block
-   for you to edit, as GitHub does.
+3. Write the comment (Markdown, on as many lines as you like). **Preview**
+   shows it as GitHub will. Then click **Add to Review** to keep it for your
+   review, or **Comment Now** to post it at once. ⌘⏎ adds it to the review,
+   and Escape closes the box. On the new side, **Suggest Change** puts the
+   selected lines in a `suggestion` block for you to edit, as GitHub does.
+
+GitHub takes comments only on the lines of the diff: the changed lines and the
+3 lines around each change. Other lines have no **+**; point at their gutter to
+see why. A range has to stay inside one group of changes, so a drag stops at
+its edge. In **Since your review**, only the new side takes comments.
+
+To comment on the whole file rather than on its lines, click **Comment on
+File** beside the diff's file list. Comments on the file show above its first
+line.
 
 A comment with a suggestion has an **Apply Suggestion Locally** link. With the
 pull request's branch checked out, it opens the file and replaces the lines in
 the editor, where you can review it, undo it, or save it. If the lines changed
 since the suggestion was made, it says so and changes nothing.
+
+To apply several suggestions at once, check **Select** under each one, in this
+file or in others, then click **Apply 2 Selected Suggestions** (with your
+count) under any of them. Suggestions that
+change the same lines can't go in together. After applying, Tusk offers to
+save the files and commit them as "Apply suggestions from code review". The
+commit includes every change in those files, and only those files. Tusk never
+pushes it; push when you're ready.
 
 **Add to Review** puts the comment in your pending review on GitHub, which only
 you can see until you submit it. It's the same review as in the browser: a

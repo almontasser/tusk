@@ -1,12 +1,16 @@
 // Pull requests: a file's diff with its threads, the comment form, pending comments, Viewed, and since your review.
 import { monaco } from "./editor";
-import { diffCursor, type DiffFile, git, gitOutput, gitStatus, showDiff, showDiffs } from "./git";
+import { diffCursor, type DiffFile, git, gitFailure, gitOutput, gitStatus, refreshGit, showDiff, showDiffs } from "./git";
 import { suggestion } from "./gitparse";
 import { showError, status, withProgress } from "./status";
 import { mod } from "./platform.ts";
+import { confirm } from "./palette";
 import { type Details, el, gh, host, hub, loadMarkdown, markdown, me, myLogin, pages, repoUrl, type Thread } from "./prshared";
-import { commentBlock, expanded, lineComments, mentions, restTarget } from "./prthreads";
+import { commentBlock, expanded, lineComments, restTarget, writer } from "./prthreads";
 import { addPending, deletePending, loadPending, pendingOf, pendingReview } from "./prreview";
+import { batchOrder, clampToHunk, commentable, type Hunk, hunks, type Side, type Suggested } from "./prhunks";
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 // gh's --paginate follows $endCursor through every page of files.
 const VIEWED = `query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
@@ -102,34 +106,43 @@ export function showFileDiff(pr: Details, path: string, threads: Thread[], at?: 
     status: viewed?.get(f.path) ? "✓" : "",
     load: async (): Promise<[string, string]> => ["", ""],
     show: () => showOneDiff(pr, f.path, threads, f.path === path ? at : undefined, since?.oid),
-    // GitHub's Viewed checkbox for the file; checking it moves on to the next file you haven't viewed.
-    extra: viewed?.has(f.path)
-      ? () => {
-          const box = el("input");
-          box.type = "checkbox";
-          box.checked = !!viewed.get(f.path);
-          const toggle = el("label", "diff-viewed");
-          toggle.title = "Mark the file as viewed on GitHub, and go to the next file you haven't viewed";
-          toggle.append(box, " Viewed");
-          box.onchange = async () => {
-            try {
-              await setViewed(pr.id, f.path, box.checked);
-            } catch (e) {
-              box.checked = !box.checked;
-              return showError("Can't change the file's Viewed state", e);
-            }
-            viewed.set(f.path, box.checked);
-            files[i].status = box.checked ? "✓" : "";
-            if (pages.has(pr.number)) hub.renderPullRequest(pr.number);
-            if (!box.checked) return;
-            const next = [...files.keys()].map((k) => (i + 1 + k) % files.length).find((k) => !viewed.get(files[k].path));
-            if (next === undefined) host.status(`You've viewed all ${files.length} files of #${pr.number}.`);
-            else showDiffs(files, label, next);
-          };
-          return toggle;
-        }
-      : undefined,
+    // Comment on File, and GitHub's Viewed checkbox for the file.
+    extra: () => {
+      const comment = el("button", "", "Comment on File");
+      comment.title = "Comment on the whole file rather than on its lines";
+      // The form opens above the first line, so the diff scrolls up to it.
+      comment.onclick = () => ((form = { side: "RIGHT", line: 0, start: 0, file: true }), drawZones(), shown?.diff.getModifiedEditor().setScrollTop(0));
+      const extras = el("span", "pr-diff-extras");
+      extras.append(comment);
+      if (viewed?.has(f.path)) extras.append(viewedBox(f, i));
+      return extras;
+    },
   }));
+  // Checking Viewed moves on to the next file you haven't viewed.
+  function viewedBox(f: { path: string }, i: number) {
+    const box = el("input");
+    box.type = "checkbox";
+    box.checked = !!viewed!.get(f.path);
+    const toggle = el("label", "diff-viewed");
+    toggle.title = "Mark the file as viewed on GitHub, and go to the next file you haven't viewed";
+    toggle.append(box, " Viewed");
+    box.onchange = async () => {
+      try {
+        await setViewed(pr.id, f.path, box.checked);
+      } catch (e) {
+        box.checked = !box.checked;
+        return showError("Can't change the file's Viewed state", e);
+      }
+      viewed!.set(f.path, box.checked);
+      files[i].status = box.checked ? "✓" : "";
+      if (pages.has(pr.number)) hub.renderPullRequest(pr.number);
+      if (!box.checked) return;
+      const next = [...files.keys()].map((k) => (i + 1 + k) % files.length).find((k) => !viewed!.get(files[k].path));
+      if (next === undefined) host.status(`You've viewed all ${files.length} files of #${pr.number}.`);
+      else showDiffs(files, label, next);
+    };
+    return toggle;
+  }
   return showDiffs(files, label, Math.max(0, files.findIndex((f) => f.path === path)));
 }
 
@@ -139,9 +152,10 @@ export function showFileDiff(pr: Details, path: string, threads: Thread[], at?: 
  */
 async function showOneDiff(pr: Details, path: string, threads: Thread[], at?: { line: number | null; side: "LEFT" | "RIGHT" }, from?: string): Promise<boolean> {
   let diff: monaco.editor.IStandaloneDiffEditor;
+  let mergeBase: string;
   try {
     const slow = setTimeout(() => status(`Fetching #${pr.number}…`, "prs:progress"), 300);
-    const [mergeBase] = await Promise.all([prepareDiff(pr).finally(() => (clearTimeout(slow), status("", "prs:progress"))), loadMarkdown(), me()]);
+    [mergeBase] = await Promise.all([prepareDiff(pr).finally(() => (clearTimeout(slow), status("", "prs:progress"))), loadMarkdown(), me()]);
     const show = (spec: string) => git("show", spec).catch(() => "");
     const [original, modified] = await Promise.all([show(`${from ?? mergeBase}:${path}`), show(`${pr.headRefOid}:${path}`)]);
     const action = { label: "Comment on Line", title: "Comment on the selected lines, or reply to the comments on the cursor's line", run: () => commentAtCursor() };
@@ -152,7 +166,14 @@ async function showOneDiff(pr: Details, path: string, threads: Thread[], at?: { 
     return false;
   }
   diff.layout(); // The diff was hidden until now, so its editors have no width yet.
-  shown = { pr, path, threads, diff, zones: [], model: diff.getModel()?.modified };
+  const model = diff.getModel()?.modified;
+  shown = { pr, path, threads, diff, zones: [], model, from, hunks: null };
+  // Which lines take comments comes from GitHub, so the diff doesn't wait for it; until then every line has its +.
+  hunksOf(pr, path, mergeBase).then((h) => {
+    const now = shown;
+    if (now && now.model === model) now.hunks = h;
+  });
+  if (picked.number !== pr.number || picked.root !== host.root()) picked = { number: pr.number, root: host.root(), items: new Map() };
   addCommentGutter(diff);
   form = undefined;
   drawZones();
@@ -169,39 +190,122 @@ async function showOneDiff(pr: Details, path: string, threads: Thread[], at?: { 
   return true;
 }
 
+/** GitHub's patch of each file the pull request changes, per pull request and head commit. */
+const patches = new Map<string, Promise<Map<string, string | null>>>();
+
 /**
- * Puts a suggestion into your copy of the file, in its editor, where you can review, undo, or save it. Only on the
- * pull request's branch, and only while the lines still read as they did in the pull request.
+ * The hunks GitHub takes comments in, from its own patch of the file: its diff can join hunks that git's keeps apart.
+ * GitHub leaves the patch out of large and binary files, so git's diff with the same 3 lines of context stands in.
+ * Null when neither can be read, and then every line keeps its +, as GitHub has the last word.
  */
-async function applySuggestion(pr: Details, t: Thread, text: string) {
+async function hunksOf(pr: Details, path: string, mergeBase: string): Promise<Hunk[] | null> {
+  const key = `${host.root()}\0${pr.number}:${pr.headRefOid}`;
+  if (!patches.has(key)) {
+    const load = gh("api", "--paginate", `repos/{owner}/{repo}/pulls/${pr.number}/files`, "--jq", ".[] | [.filename, .patch]").then((out) => new Map<string, string | null>(out.split("\n").filter(Boolean).map((l) => JSON.parse(l))));
+    patches.set(key, load.catch((e) => (patches.delete(key), Promise.reject(e))));
+  }
+  try {
+    const patch = (await patches.get(key)!).get(path);
+    return hunks(patch ?? (await git("diff", "-U3", "--no-renames", mergeBase, pr.headRefOid, "--", path)));
+  } catch {
+    return null;
+  }
+}
+
+const OUTSIDE = "GitHub takes comments only on the diff's changed lines and the 3 lines around them.";
+
+/** Why GitHub won't take a comment on lines `start` to `end` of a side, or undefined when it will. */
+function whyNot(side: Side, start: number, end: number): string | undefined {
+  if (!shown) return;
+  // Since your review, the old side is the commit you reviewed, whose line numbers GitHub doesn't know.
+  if (shown.from && side === "LEFT") return "Since your review, the old side isn't the pull request's base. Comment on the new side.";
+  if (!shown.hunks || commentable(shown.hunks, side, start, end)) return;
+  return start === end ? OUTSIDE : `${OUTSIDE} A range has to stay inside one group of them.`;
+}
+
+/** Suggestions you selected to apply together, by comment ID, in pull request `number` of project `root`. */
+let picked = { number: 0, root: "", items: new Map<number, Suggested>() };
+
+/**
+ * Puts suggestions into your copy of their files, in their editors, where you can review, undo, or save them, then
+ * offers to commit them. Only on the pull request's branch, and only while the lines still read as they did in the
+ * pull request. Each file's suggestions go in from the bottom up, so one doesn't move the lines of the next.
+ */
+async function applySuggestions(pr: Details, items: Suggested[]) {
   if (gitStatus()?.branch !== pr.headRefName) return showError(`Check out #${pr.number} (${pr.headRefName}) to apply its suggestions.`);
-  const model = shown?.model;
-  if (!model || !t.line) return;
-  const start = t.start_line ?? t.line;
-  const expected = model.getValueInRange({ startLineNumber: start, startColumn: 1, endLineNumber: t.line, endColumn: model.getLineMaxColumn(t.line) });
-  if (await host.replaceLines(`${host.root()}/${t.path}`, start, t.line, expected, text)) host.status(`Applied the suggestion to ${t.path}:${start}. Review it and save.`);
-  else showError(`The lines of ${t.path} changed since the suggestion was made. Apply it by hand.`);
+  const { ordered, overlap } = batchOrder(items);
+  if (overlap) return showError(`The suggestions on ${overlap[0].path}:${overlap[0].start} and ${overlap[1].path}:${overlap[1].start} change the same lines. Apply one of them.`);
+  const heads = new Map<string, Promise<string>>();
+  const head = (path: string) => heads.get(path) ?? heads.set(path, git("show", `${pr.headRefOid}:${path}`).catch(() => "")).get(path)!;
+  const applied = new Set<string>();
+  const failed: string[] = [];
+  for (const s of ordered) {
+    const text = await head(s.path);
+    const eol = text.includes("\r\n") ? "\r\n" : "\n";
+    const lines = text.split(eol);
+    const expected = lines.slice(s.start - 1, s.end).join(eol);
+    if (s.end <= lines.length && (await host.replaceLines(`${host.root()}/${s.path}`, s.start, s.end, expected, s.text))) {
+      applied.add(s.path);
+      picked.items.delete(s.id);
+    } else failed.push(`${s.path}:${s.start}`);
+  }
+  drawZones();
+  if (failed.length) showError(`The lines of ${failed.join(", ")} changed since the suggestion was made. Apply ${failed.length === 1 ? "it" : "them"} by hand.`);
+  if (!applied.size) return;
+  const count = plural(ordered.length - failed.length, "suggestion");
+  const files = [...applied];
+  host.status(`Applied ${count} to ${plural(files.length, "file")}. Review the changes.`);
+  if (!(await confirm(`Save ${plural(files.length, "file")} and commit all their changes as "Apply suggestions from code review"? Nothing is pushed.`, "Save and Commit"))) return;
+  for (const path of files)
+    if (!(await host.save(`${host.root()}/${path}`))) return showError(`${path} wasn't saved, so nothing was committed.`);
+  // Only these files: anything else you staged stays out of the commit.
+  const args = ["--literal-pathspecs", "commit", "-m", "Apply suggestions from code review", "--", ...files];
+  const result = await withProgress("Committing the suggestions…", (signal) => gitOutput(args, signal), { cancellable: true, error: "Commit failed" });
+  await refreshGit();
+  if (!result) return;
+  if (result.code) return gitFailure(/hook/i.test(result.output) ? "Commit failed: a git hook refused it" : "Commit failed", result.output);
+  host.status(`Committed ${count}. Push when you're ready.`);
 }
 
 // ---- Line comments and pending reviews ----
 
-/** The diff on screen, and the view zones (threads, pending comments, and the comment form) drawn in it. */
-export let shown: { pr: Details; path: string; threads: Thread[]; diff: monaco.editor.IStandaloneDiffEditor; zones: [monaco.editor.ICodeEditor, string][]; model?: monaco.editor.ITextModel } | undefined;
-/** The open comment form: a new comment on lines, or a reply to a thread. */
-let form: { side: "LEFT" | "RIGHT"; line: number; start: number; reply?: Thread } | undefined;
+/**
+ * The diff on screen, and the view zones (threads, pending comments, and the comment form) drawn in it. `from` is
+ * the commit you last reviewed, when the diff shows only what changed since, and `hunks` the lines GitHub takes
+ * comments on, null when unknown.
+ */
+export let shown:
+  | { pr: Details; path: string; threads: Thread[]; diff: monaco.editor.IStandaloneDiffEditor; zones: [monaco.editor.ICodeEditor, string, ResizeObserver][]; model?: monaco.editor.ITextModel; from?: string; hunks: Hunk[] | null }
+  | undefined;
+/**
+ * The open comment form: a new comment on lines or on the whole file, or a reply to a thread. `text` keeps what you
+ * typed when the zones redraw, such as when a reply or your pending review arrives.
+ */
+let form: { side: Side; line: number; start: number; reply?: Thread; file?: boolean; text?: string } | undefined;
 
 const lines = (start: number | undefined | null, line: number) => (start && start !== line ? `lines ${start}–${line}` : `line ${line}`);
+const isFile = (c: { subject_type?: string }) => c.subject_type === "file";
 
-/** Adds a view zone under a line. A zone needs its height up front, so the content is measured first, at the editor's visible width. */
+/**
+ * Adds a view zone under a line, or above the first with line 0. A zone needs its height up front, so the content is
+ * measured first, at the editor's visible width, and again whenever its height changes, such as on Preview.
+ */
 function addZone(editor: monaco.editor.ICodeEditor, line: number, content: HTMLElement) {
   content.style.width = `${editor.getLayoutInfo().contentWidth - 40}px`;
   document.body.append(content);
-  const heightInPx = content.offsetHeight + 8;
-  const node = el("div");
-  node.append(content);
+  const zone = { afterLineNumber: line, heightInPx: content.offsetHeight + 8, domNode: el("div"), suppressMouseDown: true };
+  zone.domNode.append(content);
   // The zone's buttons and text box take their own clicks and keys, not the editor's.
-  node.onkeydown = (e) => e.stopPropagation();
-  editor.changeViewZones((zones) => shown!.zones.push([editor, zones.addZone({ afterLineNumber: line, heightInPx, domNode: node, suppressMouseDown: true })]));
+  zone.domNode.onkeydown = (e) => e.stopPropagation();
+  let id = "";
+  editor.changeViewZones((zones) => (id = zones.addZone(zone)));
+  const resized = new ResizeObserver(() => {
+    // A zone scrolled out of view has no height; it keeps the last one.
+    const height = content.offsetHeight + 8;
+    if (content.offsetHeight && height !== zone.heightInPx) (zone.heightInPx = height), editor.changeViewZones((zones) => zones.layoutZone(id));
+  });
+  resized.observe(content);
+  shown!.zones.push([editor, id, resized]);
 }
 
 /** Draws the file's threads, your pending comments, and the open comment form under their lines. */
@@ -210,13 +314,15 @@ export function drawZones() {
   if (shown && shown.diff.getModel()?.modified !== shown.model) shown = undefined;
   if (!shown) return;
   const { pr, path, threads, diff } = shown;
-  shown.zones.forEach(([editor, id]) => editor.changeViewZones((zones) => zones.removeZone(id)));
+  shown.zones.forEach(([editor, id, resized]) => (resized.disconnect(), editor.changeViewZones((zones) => zones.removeZone(id))));
   shown.zones = [];
-  const editorFor = (side: "LEFT" | "RIGHT") => (side === "LEFT" ? diff.getOriginalEditor() : diff.getModifiedEditor());
+  const editorFor = (side: Side) => (side === "LEFT" ? diff.getOriginalEditor() : diff.getModifiedEditor());
+  // Comments on the whole file go above its first line.
+  const place = (c: { side: Side; line: number | null; subject_type?: string }): [monaco.editor.ICodeEditor, number] => (isFile(c) ? [diff.getModifiedEditor(), 0] : [editorFor(c.side), c.line!]);
   const repo = repoUrl(pr);
   const reload = async () => ((shown!.threads = await lineComments(pr.number)), drawZones());
   for (const t of threads) {
-    if (t.path !== path || !t.line) continue;
+    if (t.path !== path || (!t.line && !isFile(t))) continue;
     const thread = el("div", `pr-thread${t.resolved ? " resolved" : ""}`);
     const action = (parent: HTMLElement, label: string, run: () => unknown) => {
       const b = el("button", "link", label);
@@ -228,42 +334,72 @@ export function drawZones() {
       const summary = el("div", "pr-meta", `Resolved · ${t.comments.length} ${t.comments.length === 1 ? "comment" : "comments"} from ${t.user}`);
       action(summary, "Show", () => (expanded.add(t.id), drawZones()));
       thread.append(summary);
-      addZone(editorFor(t.side), t.line, thread);
+      addZone(...place(t), thread);
       continue;
     }
-    if (t.start_line && t.start_line !== t.line) thread.append(el("div", "pr-meta", `On ${lines(t.start_line, t.line)}`));
-        for (const c of t.comments) {
+    if (isFile(t)) thread.append(el("div", "pr-meta", "On the file"));
+    else if (t.start_line && t.start_line !== t.line) thread.append(el("div", "pr-meta", `On ${lines(t.start_line, t.line!)}`));
+    for (const c of t.comments) {
       thread.append(...commentBlock(pr.number, c.user, c.body, restTarget(`repos/{owner}/{repo}/pulls/comments/${c.id}`), repo, drawZones, reload, c.created_at));
-      const suggested = t.side === "RIGHT" ? suggestion(c.body) : null;
-      if (suggested !== null) {
-        const apply = el("div", "pr-thread-actions");
-        action(apply, "Apply Suggestion Locally", () => applySuggestion(pr, t, suggested));
-        thread.append(apply);
-      }
+      const suggested = t.side === "RIGHT" && !isFile(t) ? suggestion(c.body) : null;
+      if (suggested !== null) thread.append(suggestionActions(pr, { id: c.id, path: t.path, start: t.start_line ?? t.line!, end: t.line!, text: suggested }));
     }
     if (form?.reply?.id === t.id) thread.append(commentForm());
     else {
       const actions = el("div", "pr-thread-actions");
-      action(actions, "Reply", () => ((form = { side: t.side, line: t.line!, start: t.line!, reply: t }), drawZones()));
+      action(actions, "Reply", () => ((form = { side: t.side, line: t.line ?? 0, start: t.line ?? 0, reply: t }), drawZones()));
       if (t.node) action(actions, t.resolved ? "Unresolve" : "Resolve", () => setResolved(pr.number, t, !t.resolved));
       if (t.resolved) action(actions, "Hide", () => (expanded.delete(t.id), drawZones()));
       if (threads.some((x) => x.id !== t.id && x.line && !x.resolved)) action(actions, "Next Unresolved", () => nextUnresolved(pr, threads, t));
       thread.append(actions);
     }
-    addZone(editorFor(t.side), t.line, thread);
+    addZone(...place(t), thread);
   }
   for (const c of pendingReview(pr.number)?.comments ?? []) {
-    if (c.path !== path || !c.line) continue;
+    if (c.path !== path || (!c.line && !isFile(c))) continue;
     const draft = el("div", "pr-thread pending");
     const remove = el("button", "link", "Delete");
     remove.onclick = () =>
       deletePending(pr.number, c).then(drawZones, (e) => showError(`Can't delete the pending comment`, e));
-    const meta = el("div", "pr-meta", `Pending · ${lines(c.start_line, c.line)} · `);
+    const meta = el("div", "pr-meta", `Pending · ${isFile(c) ? "on the file" : lines(c.start_line, c.line!)} · `);
     meta.append(remove);
     draft.append(meta, markdown(c.body, repo));
-    addZone(editorFor(c.side), c.line, draft);
+    addZone(...place(c), draft);
   }
-  if (form && !form.reply) addZone(editorFor(form.side), form.line, commentForm());
+  if (form?.file) addZone(diff.getModifiedEditor(), 0, commentForm());
+  else if (form && !form.reply) addZone(editorFor(form.side), form.line, commentForm());
+}
+
+/**
+ * Apply Suggestion Locally, and a Select box to apply several suggestions at once, with the button that applies
+ * the ones you selected, in this file or others of the pull request.
+ */
+function suggestionActions(pr: Details, item: Suggested) {
+  const row = el("div", "pr-thread-actions");
+  const apply = el("button", "link", "Apply Suggestion Locally");
+  apply.onclick = () => applySuggestions(pr, [item]);
+  const box = el("input");
+  box.type = "checkbox";
+  box.checked = picked.items.has(item.id);
+  box.dataset.suggestion = String(item.id);
+  // The redraw updates every count; focus comes back to this box for the keyboard.
+  box.onchange = () => {
+    if (box.checked) picked.items.set(item.id, item);
+    else picked.items.delete(item.id);
+    drawZones();
+    document.querySelector<HTMLInputElement>(`input[data-suggestion="${item.id}"]`)?.focus();
+  };
+  const select = el("label", "pr-suggestion-pick");
+  select.title = "Select the suggestion to apply it together with others";
+  select.append(box, " Select");
+  row.append(apply, " · ", select);
+  if (picked.items.size) {
+    const all = el("button", "link", `Apply ${plural(picked.items.size, "Selected Suggestion")}`);
+    all.title = "Apply every suggestion you selected in this pull request, then offer to commit them";
+    all.onclick = () => applySuggestions(pr, [...picked.items.values()]);
+    row.append(" · ", all);
+  }
+  return row;
 }
 
 /** The comment form's text box and buttons. ⌘⏎ does the first button's action, and Escape cancels. */
@@ -273,8 +409,16 @@ function commentForm() {
   const box = el("div", "pr-comment-form");
   const text = el("textarea");
   text.rows = 4;
-  text.placeholder = f.reply ? `Reply to ${f.reply.user} (Markdown)` : `Comment on ${lines(f.start, f.line)}${f.side === "LEFT" ? " of the old version" : ""} (Markdown)`;
-  mentions(text, pr.number);
+  text.value = f.text ?? "";
+  // The box grows with its text, up to a point, and its zone grows with it.
+  const grow = () => {
+    text.style.height = "";
+    if (text.scrollHeight > text.clientHeight) text.style.height = `${Math.min(text.scrollHeight + 2, 400)}px`;
+  };
+  text.addEventListener("input", () => ((f.text = text.value), grow()));
+  requestAnimationFrame(grow);
+  text.placeholder = f.reply ? `Reply to ${f.reply.user} (Markdown)` : f.file ? `Comment on ${path} (Markdown)` : `Comment on ${lines(f.start, f.line)}${f.side === "LEFT" ? " of the old version" : ""} (Markdown)`;
+  text.setAttribute("aria-label", f.reply ? "Reply" : "Comment");
   const buttons = el("div", "pr-actions");
   const close = () => ((form = undefined), drawZones());
   const button = (label: string, run: (body: string) => unknown, primary = false) => {
@@ -298,28 +442,29 @@ function commentForm() {
     button("Add to Review", async (body) => {
       buttons.querySelectorAll("button").forEach((b) => (b.disabled = true));
       try {
-        await addPending(pr, { path, line: f.line, side: f.side, ...(f.start !== f.line ? { start_line: f.start } : {}) }, body);
+        await addPending(pr, { path, line: f.line, side: f.side, ...(f.file ? { file: true } : f.start !== f.line ? { start_line: f.start } : {}) }, body);
         host.status(`Added to your pending review on #${pr.number}. Submit it from the pull request's page, or on GitHub.`);
         close();
       } catch (e) {
-        // GitHub accepts comments only on lines inside the diff's changes and the lines around them.
         showError(`Can't add the comment to your review`, e);
         buttons.querySelectorAll("button").forEach((b) => (b.disabled = false));
       }
     }, true);
     const range = f.start !== f.line ? ["-F", `start_line=${f.start}`, "-f", `start_side=${f.side}`] : [];
+    const where = f.file ? ["-f", "subject_type=file"] : ["-F", `line=${f.line}`, "-f", `side=${f.side}`, ...range];
     if (!inReview) button("Comment Now", (body) =>
-      post([`repos/{owner}/{repo}/pulls/${pr.number}/comments`, "-f", `body=${body}`, "-f", `commit_id=${pr.headRefOid}`, "-f", `path=${path}`, "-F", `line=${f.line}`, "-f", `side=${f.side}`, ...range]),
+      post([`repos/{owner}/{repo}/pulls/${pr.number}/comments`, "-f", `body=${body}`, "-f", `commit_id=${pr.headRefOid}`, "-f", `path=${path}`, ...where]),
     );
   }
   // On the new side, Suggest Change writes the lines into a suggestion block to edit, as on GitHub.
-  if (!f.reply && f.side === "RIGHT" && shown?.model) {
+  if (!f.reply && !f.file && f.side === "RIGHT" && shown?.model) {
     const model = shown.model;
     const suggest = el("button", "", "Suggest Change");
     suggest.title = "Insert the lines as a suggestion to edit";
     suggest.onclick = () => {
       const lines = model.getValueInRange({ startLineNumber: f.start, startColumn: 1, endLineNumber: f.line, endColumn: model.getLineMaxColumn(f.line) });
       text.setRangeText(`${text.value && !text.value.endsWith("\n") ? "\n" : ""}\`\`\`suggestion\n${lines}\n\`\`\`\n`, text.selectionStart, text.selectionEnd, "end");
+      text.dispatchEvent(new Event("input"));
       text.focus();
     };
     buttons.append(suggest);
@@ -334,14 +479,13 @@ function commentForm() {
   // Posts a comment or a reply at once, then reloads the threads.
   const post = async (args: string[]) => {
     buttons.querySelectorAll("button").forEach((b) => (b.disabled = true));
-    // GitHub accepts comments only on lines inside the diff's changes and the lines around them.
     const posted = await withProgress("Posting the comment…", () => gh("api", "--method", "POST", ...args), { error: "Can't comment" });
     if (posted === undefined) return buttons.querySelectorAll("button").forEach((b) => (b.disabled = false));
-    host.status(`Commented on ${path}:${f.line}`);
+    host.status(f.file ? `Commented on ${path}` : `Commented on ${path}:${f.line}`);
     form = undefined;
     await hub.threadsChanged(pr.number);
   };
-  box.append(text, buttons);
+  box.append(writer(text, repoUrl(pr), pr.number), buttons);
   requestAnimationFrame(() => text.focus());
   return box;
 }
@@ -392,12 +536,25 @@ export function sinceReview(pr: Details, oid: string): Promise<Since> {
 /** Diff editors that have the comment gutter's listeners; the diff editor is made once and reused. */
 const guttered = new WeakSet<monaco.editor.IStandaloneDiffEditor>();
 
+/** A drag in the gutter from the + of line `anchor` to `line`, which selects lines for one comment. */
+let drag: { editor: monaco.editor.ICodeEditor; side: Side; anchor: number; line: number; paint(line?: number): void } | undefined;
+
+/** Opens the comment form for lines `start` to `end`, or says why GitHub won't take a comment there. */
+function openForm(side: Side, start: number, end: number) {
+  const why = whyNot(side, start, end);
+  if (why) return host.status(why);
+  form = { side, line: end, start };
+  drawZones();
+}
+
 /**
  * A + in the gutter of the line under the mouse, as on GitHub: click it to comment on that line, or on the selected
- * lines when the selection includes it. Only a pull request's diff has it; other diffs hide the glyph margin again.
+ * lines when the selection includes it, or drag from it to comment on several lines. Lines GitHub takes no comment
+ * on have no +, and their gutter says why on hover. Only a pull request's diff has it; other diffs hide the glyph
+ * margin again.
  */
 function addCommentGutter(diff: monaco.editor.IStandaloneDiffEditor) {
-  const sides: [monaco.editor.ICodeEditor, "LEFT" | "RIGHT"][] = [[diff.getOriginalEditor(), "LEFT"], [diff.getModifiedEditor(), "RIGHT"]];
+  const sides: [monaco.editor.ICodeEditor, Side][] = [[diff.getOriginalEditor(), "LEFT"], [diff.getModifiedEditor(), "RIGHT"]];
   for (const [editor] of sides) editor.updateOptions({ glyphMargin: true });
   if (guttered.has(diff)) return;
   guttered.add(diff);
@@ -405,24 +562,49 @@ function addCommentGutter(diff: monaco.editor.IStandaloneDiffEditor) {
   diff.onDidChangeModel(() => {
     if (!ours()) for (const [editor] of sides) editor.updateOptions({ glyphMargin: false });
   });
+  // The drag ends wherever you let go of the mouse, inside the editor or not.
+  window.addEventListener("mouseup", () => {
+    if (!drag) return;
+    const { editor, side, anchor, line, paint } = drag;
+    drag = undefined;
+    paint();
+    if (anchor !== line) return openForm(side, Math.min(anchor, line), Math.max(anchor, line));
+    // A click on the + of a selected line comments on the selection.
+    const s = editor.getSelection();
+    const end = s && s.endColumn === 1 && s.endLineNumber > s.startLineNumber ? s.endLineNumber - 1 : s?.endLineNumber;
+    if (s && end && s.startLineNumber <= line && line <= end && end > s.startLineNumber) openForm(side, s.startLineNumber, end);
+    else openForm(side, line, line);
+  });
   for (const [editor, side] of sides) {
-    let hover: string[] = [];
-    const show = (line?: number) => {
+    let marks: string[] = [];
+    const paint = (line?: number) => {
       const model = editor.getModel();
       if (!model) return;
-      hover = model.deltaDecorations(hover, line && ours() ? [{ range: new monaco.Range(line, 1, line, 1), options: { glyphMarginClassName: "codicon codicon-add pr-add-glyph", glyphMarginHoverMessage: { value: "Comment on this line (select lines first for a range)" } } }] : []);
+      const add = { glyphMarginClassName: "codicon codicon-add pr-add-glyph", glyphMarginHoverMessage: { value: "Comment on this line. Drag to comment on several lines." } };
+      const at = (n: number) => new monaco.Range(n, 1, n, 1);
+      let decorations: monaco.editor.IModelDeltaDecoration[] = [];
+      if (drag?.editor === editor) {
+        const [start, end] = [Math.min(drag.anchor, drag.line), Math.max(drag.anchor, drag.line)];
+        decorations = [{ range: new monaco.Range(start, 1, end, 1), options: { isWholeLine: true, className: "pr-drag-range" } }, { range: at(drag.line), options: add }];
+      } else if (line && ours()) {
+        const why = whyNot(side, line, line);
+        decorations = [{ range: at(line), options: why ? { glyphMarginClassName: "pr-no-add-glyph", glyphMarginHoverMessage: { value: why } } : add }];
+      }
+      marks = model.deltaDecorations(marks, decorations);
     };
-    editor.onMouseMove((e) => show(e.target.position?.lineNumber));
-    editor.onMouseLeave(() => show());
+    editor.onMouseMove((e) => {
+      const line = e.target.position?.lineNumber;
+      // A range can't span two groups of changes, so the drag stops at the edge of its own.
+      if (drag?.editor === editor && line) drag.line = shown?.hunks ? clampToHunk(shown.hunks, side, drag.anchor, line) : line;
+      paint(line);
+    });
+    editor.onMouseLeave(() => drag?.editor !== editor && paint());
     editor.onMouseDown((e) => {
       if (!ours() || !e.event.leftButton || !e.target.element?.classList.contains("pr-add-glyph")) return;
-      const line = e.target.position!.lineNumber;
-      const s = editor.getSelection();
-      const end = s && s.endColumn === 1 && s.endLineNumber > s.startLineNumber ? s.endLineNumber - 1 : s?.endLineNumber;
-      const range = s && end && s.startLineNumber <= line && line <= end && end > s.startLineNumber ? [s.startLineNumber, end] : [line, line];
       e.event.preventDefault();
-      form = { side, line: range[1], start: range[0] };
-      drawZones();
+      const line = e.target.position!.lineNumber;
+      drag = { editor, side, anchor: line, line, paint };
+      paint(line);
     });
   }
 }
@@ -433,7 +615,8 @@ function commentAtCursor() {
   if (!cursor || !shown) return;
   const side = cursor.side === "original" ? "LEFT" : "RIGHT";
   const { line, startLine } = cursor;
-  const reply = startLine === line ? shown.threads.find((t) => t.path === shown!.path && t.line === line && t.side === side) : undefined;
+  const reply = startLine === line ? shown.threads.find((t) => t.path === shown!.path && t.line === line && t.side === side && !isFile(t)) : undefined;
+  if (!reply) return openForm(side, startLine, line);
   form = { side, line, start: startLine, reply };
   drawZones();
 }

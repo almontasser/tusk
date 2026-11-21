@@ -4094,7 +4094,7 @@ draws the diff with its threads (`showOneDiff`), so the diff's previous and
 next buttons move through the pull request's files.
 
 `suggestion` in `gitparse.ts` reads a comment's `suggestion` block.
-`applySuggestion` compares the thread's lines in the pull request's head
+`applySuggestions` compares the thread's lines in the pull request's head
 version with the lines in your file, through the host's `replaceLines`, and
 replaces them in the editor as one undoable edit only when they match and the
 pull request's branch is checked out.
@@ -4215,6 +4215,49 @@ and `POST git/refs` for the branch. **Resolve Conflicts…** runs `gh pr
 checkout`, then `git fetch` and `git merge --no-edit` through `gitTask`, which
 reports conflicts, and opens `openMerge` on the first conflicted file. The
 commit and push stay with the Commit tab.
+
+#### Commenting in the diff
+
+GitHub rejects a review comment on a line outside its diff's hunks, and a range
+that spans two hunks. `hunksOf` in `prdiff.ts` reads the hunks from the `patch`
+of each file in `repos/{owner}/{repo}/pulls/N/files`, cached per pull request
+and head commit, and `hunks` in `prhunks.ts` parses their `@@` headers. GitHub's
+patch, not `git diff -U3`, is the source: GitHub joins two hunks that are a line
+apart, which git keeps separate. GitHub leaves the patch out of large and binary
+files, and then `git diff -U3` between the merge base and the head stands in.
+The diff opens without waiting for the patch; until it arrives, and when it
+can't be read, every line keeps its **+**. In **Since your review**, the old side
+is the commit you reviewed, so it takes no comments.
+
+The gutter's **+** is a glyph decoration on the line under the mouse. Pressing it
+starts a drag, which `clampToHunk` keeps inside the first line's hunk, and a
+`mouseup` on the window opens the form for the range. A line without a **+** gets
+a `pr-no-add-glyph` decoration whose hover message says why.
+
+A comment on the whole file is REST's `subject_type: "file"` on
+`pulls/N/comments`, or, for a pending review, GraphQL's
+`addPullRequestReviewThread` with `subjectType: FILE`. REST's review creation
+takes no file comments, so without a pending review, `addPullRequestReview`
+without an event starts one first. REST lists a file comment with `line: 1`, so
+the diff checks `subject_type` and draws it in a zone above the first line
+(`afterLineNumber: 0`).
+
+Each view zone has a `ResizeObserver` on its content. When the content's height
+changes, such as on **Preview** or when you resize the text box, the zone's
+`heightInPx` changes and `layoutZone` moves the code below. The form keeps what
+you typed in `form.text`, since `drawZones` rebuilds every zone.
+
+`applySuggestions` takes one suggestion or the ones you selected, across the pull
+request's files. `batchOrder` sorts them bottom up per file, so an edit never
+moves the lines of the next, and refuses overlapping ones. After applying, it
+offers to save the files through the host's `save` and run `git commit -m "Apply
+suggestions from code review" -- <files>`, which leaves other staged changes out.
+It never pushes.
+
+A pending review's comments and their threads' sides are two paginated GraphQL
+queries, since `gh --paginate` follows only one list's `pageInfo`. `withSides`
+joins them: a comment takes the side of its thread, keyed by the thread's first
+comment.
 
 ## Filament intelligence (milestone 6)
 
