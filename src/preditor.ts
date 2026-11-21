@@ -25,6 +25,7 @@ export async function updateBranchPullRequest() {
     branchThreads = { number: pr.number, threads: await lineComments(pr.number) };
   } catch {
     // No pull request for this branch, or no GitHub remote.
+    if (lookup !== branchLookups) return;
     branchThreads = undefined;
   }
   for (const model of monaco.editor.getModels()) decorateComments(model);

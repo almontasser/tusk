@@ -236,7 +236,7 @@ function watchChecks(li: HTMLElement, number: number) {
 }
 
 async function loadChecks() {
-  const numbers = [...wanted].slice(0, 50);
+  const numbers = [...wanted].slice(0, 25);
   if (!numbers.length) return;
   numbers.forEach((n) => wanted.delete(n));
   if (wanted.size) checkTimer = setTimeout(loadChecks, 0);

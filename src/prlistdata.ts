@@ -66,7 +66,10 @@ export const EVERYWHERE: [string, string][] = [
 
 /** The `gh search prs` arguments for one of the Everywhere searches, with the search box's text and the sort. */
 export function searchArgs(flag: string, q: PrQuery, limit: number): string[] {
-  return ["search", "prs", ...(q.text.trim() ? [q.text.trim()] : []), flag, "--state=open", `--sort=${q.sort}`, "--limit", String(limit), "--json", SEARCH_FIELDS];
+  // The words go after `--`, so one such as `-label:bug` isn't read as a flag, and one by one, since gh quotes an
+  // argument with a space in it as a phrase.
+  const words = q.text.trim().split(/\s+/).filter(Boolean);
+  return ["search", "prs", flag, "--state=open", `--sort=${q.sort}`, "--limit", String(limit), "--json", SEARCH_FIELDS, ...(words.length ? ["--", ...words] : [])];
 }
 
 /** The Everywhere sections, each pull request in the first one it belongs to, and the empty sections left out. */

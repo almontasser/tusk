@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checksQuery, checkStates, cleanQuery, emptyQuery, everywhereSections, filterSummary, type FoundPullRequest, listArgs, searchArgs } from "./prlistdata.ts";
+import { checksQuery, checkStates, cleanQuery, emptyQuery, everywhereSections, filterSummary, type FoundPullRequest, listArgs, SEARCH_FIELDS, searchArgs } from "./prlistdata.ts";
 
 test("the default query asks gh for nothing extra", () => {
   assert.deepEqual(listArgs(emptyQuery()), []);
@@ -28,7 +28,8 @@ test("the summary names each filter", () => {
 });
 
 test("everywhere searches pass the text, state, and sort", () => {
-  assert.deepEqual(searchArgs("--author=@me", { ...emptyQuery(), text: "fix", sort: "updated" }, 30).slice(0, 8), ["search", "prs", "fix", "--author=@me", "--state=open", "--sort=updated", "--limit", "30"]);
+  assert.deepEqual(searchArgs("--author=@me", { ...emptyQuery(), text: " fix  -label:bug ", sort: "updated" }, 30), ["search", "prs", "--author=@me", "--state=open", "--sort=updated", "--limit", "30", "--json", SEARCH_FIELDS, "--", "fix", "-label:bug"]);
+  assert.equal(searchArgs("--author=@me", emptyQuery(), 30).at(-1), SEARCH_FIELDS);
 });
 
 test("a pull request shows in the first everywhere section it belongs to", () => {

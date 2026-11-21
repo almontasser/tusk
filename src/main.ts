@@ -346,6 +346,15 @@ function leave(pane: Pane, path: string) {
 function moveTabToNextPane() {
   if (!active) return;
   const from = currentPane();
+  // A view, such as a pull request, has no file for split() to show, so it moves into the new pane the way a
+  // dragged tab does. Alone in its pane, it already fills the editor.
+  if (panes.length < 2 && isView(active)) {
+    if (from.paths.length < 2) return;
+    const path = active;
+    splitPane(from, "row", path, false);
+    leave(from, path);
+    return saveSoon(), renderTabs();
+  }
   if (panes.length < 2) split("row");
   placeTab(active, from, panes[(panes.indexOf(from) + 1) % panes.length], null);
 }

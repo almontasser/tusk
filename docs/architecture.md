@@ -4129,7 +4129,10 @@ a project switch, and every 5 minutes while the window has focus.
 J and K are caught in the capture phase on `#pr-list-view`, before `listNav`'s
 type-ahead, and sent to the list as ↓ and ↑. ⌘Enter opens the pull request and
 then calls the host's `moveTabToNextPane`, which works because opening an
-editor view makes it the active tab synchronously.
+editor view makes it the active tab synchronously. With one pane, `split()`
+shows only files, so `moveTabToNextPane` moves a view into a new pane through
+`splitPane` and `leave`, as dropping a dragged tab on a pane's edge does. A
+view alone in the only pane stays where it is.
 
 `updateBranchPullRequest` in `preditor.ts` counts lookups so a branch change
 stops an earlier lookup and its poll. While the pull request is open and its
