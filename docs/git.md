@@ -302,14 +302,16 @@ with it:
 
 Checks list failed ones first, and the bar above them counts them by state.
 While some checks fail or run, passed and skipped ones fold into a **Show**
-link. While
-checks run, the list reloads every 15 seconds on its own. Click a check to
-open its log, if it failed in GitHub Actions, or else its page in your
-browser. The log button on a failed job shows the log of its failed steps in the editor, without the timestamps,
-scrolled to the first error, such as PHPUnit's `There were 2 failures`.
-File paths in the log that exist in the project, such as
-`tests/Feature/OrderTest.php:42`, are links: click one to open the file at that
-line. **Re-run Failed** in the heading runs the failed jobs again.
+link. While checks run, the tab checks them every 15 seconds and redraws when
+they finish or the merge state changes, so the checks, the status box, and the
+counts stay current; it waits while you type a comment.
+
+Click a check to open its log, if it failed in GitHub Actions, or else its page
+in your browser. The log button on a failed job shows the log of its failed
+steps in the editor, without the timestamps, scrolled to the first error, such
+as PHPUnit's `There were 2 failures`. File paths in the log that exist in the
+project, such as `tests/Feature/OrderTest.php:42`, are links: click one to open
+the file at that line. **Re-run Failed** in the bar runs the failed jobs again.
 
 ### Files and commits
 
@@ -318,7 +320,10 @@ Click a changed file to see its diff without checking out the branch. ⌥⌘← 
 the pull request, with its comments. A comment count marks files with line
 comments; it's yellow while a thread there is unresolved. Each file has
 GitHub's **Viewed** checkbox, so the files you've read are the same here and in
-the browser, and a bar above the files shows how many you've viewed.
+the browser, and a bar above the files shows how many you've viewed. The diff's
+header has the checkbox too: tick **Viewed** when you've read a file, and the
+diff moves on to the next file you haven't viewed. Viewed files show ✓ in the
+diff's file list.
 
 Click a commit to see its own diff.
 
@@ -328,8 +333,10 @@ Descriptions and comments render as GitHub Markdown, and their links open in
 your browser. `#123` links to that issue or pull request, and
 `@name` to that person's profile.
 
-Line comments appear in the conversation under the file and lines they're on.
-Click one to open the diff at that line. In the diff, each thread shows under
+Line comments appear in the conversation under the file and lines they're on,
+with the last lines of code they're about. Click the file name to open the diff
+at that line. Resolved threads are folded; click **Show resolved comments** to
+read them. If you wrote the pull request, its description has **Edit** too. In the diff, each thread shows under
 its line, with **Reply** and **Resolve** links. A resolved thread shows as one
 line; click **Show** to read it or **Unresolve** to reopen it. In the Files
 tab, **Go to Unresolved** opens the first unresolved thread, and **Next
@@ -376,6 +383,20 @@ still missing, **Merge When Ready**, which turns on GitHub's auto-merge.
 **More Actions** (the **…** button) edits the title, requests a review, adds or removes labels, converts
 the pull request to a draft or marks it ready, updates the branch, closes or
 reopens it, and copies its link or branch name.
+
+### Creating a pull request
+
+Click **+** in the Pull Requests tab, or choose **Create Pull Request…** from
+the actions, to open a form for the current branch in an editor tab. Pick the
+base branch (the repository's default branch at first), then check the title
+and description. The title starts as the commit's subject when the branch has
+one commit, or as the branch's name; the description starts as the
+repository's pull request template, if it has one, or as a list of the
+commits. Below the form, you see the commits the pull request adds. Tick
+**Create as a draft** for a draft, then click **Create Pull Request** (or press
+⌘⏎). If the remote doesn't have the branch's commits yet, Tusk pushes it first.
+The new pull request opens in its tab. If the branch already has an open pull
+request, the form offers to open it instead.
 
 Pull requests need the GitHub CLI (`gh`), signed in with `gh auth login`.
 

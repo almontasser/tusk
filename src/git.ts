@@ -405,8 +405,11 @@ export function showDiff(path: string, original: string, modified: string, label
   return diffEditor;
 }
 
-/** A file in a diff of several, such as a commit's or a stash's, loaded when you move to it. */
-export type DiffFile = { path: string; status?: string; load(): Promise<[string, string]>; show?(): Promise<boolean> };
+/**
+ * A file in a diff of several, such as a commit's or a stash's, loaded when you move to it. `extra` adds a control
+ * after the file list, such as a pull request file's Viewed checkbox.
+ */
+export type DiffFile = { path: string; status?: string; load(): Promise<[string, string]>; show?(): Promise<boolean>; extra?(): HTMLElement };
 let diffFiles: { files: DiffFile[]; index: number; label: string } | undefined;
 
 /**
@@ -426,8 +429,9 @@ export async function showDiffs(files: DiffFile[], label: string, index = 0) {
   }
   diffFiles = { files, index, label };
   const nav = $("diff-files");
-  nav.hidden = files.length < 2;
-  if (files.length < 2) return;
+  const extra = f.extra?.();
+  nav.hidden = files.length < 2 && !extra;
+  if (files.length < 2) return extra && nav.replaceChildren(extra);
   const select = h("select", { ariaLabel: "Changed file", onchange: () => showDiffs(files, label, select.selectedIndex) });
   files.forEach((x, i) => select.append(new Option(`${x.status ? `${x.status} ` : ""}${x.path}`, String(i), false, i === index)));
   nav.replaceChildren(
@@ -435,6 +439,7 @@ export async function showDiffs(files: DiffFile[], label: string, index = 0) {
     select,
     h("span", { class: "muted" }, `${index + 1} of ${files.length}`),
     iconButton("arrow-right", "Next file (⌥⌘→)", () => moveDiff(1)),
+    ...(extra ? [extra] : []),
   );
 }
 

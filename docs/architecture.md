@@ -3926,6 +3926,20 @@ container query turns it into one column under 760 pixels, for a split pane.
 Avatars load from the pull request's own host (`<origin>/<login>.png`), and
 fall back to the login's initial when they don't load.
 
+Line threads in the conversation show the end of their `diff_hunk` from the
+REST comments, as GitHub does above a review comment. The diff's Viewed
+checkbox is a `DiffFile.extra` control, which `showDiffs` in `git.ts` adds after
+its file list. It shares the tab's Viewed map (`viewedOf`), and checking it
+moves to the next unviewed file with `showDiffs`.
+
+`createPullRequest` opens a form in its own editor tab. It reads the default
+branch with `gh repo view`, the remote branches with `git for-each-ref`, and
+the template from `.github/pull_request_template.md` and the other places
+GitHub looks. It pushes with `git push -u origin HEAD` through `gitTask` when
+the branch has no upstream or is ahead of it, since `gh pr create` would ask in
+a terminal, then runs `gh pr create` with `--base`, `--head`, `--title`,
+`--body`, and `--draft`.
+
 #### Fields, checks, and the status box
 
 There are three field lists: `FIELDS` for the status bar's lookup, `LIST_FIELDS`
@@ -3946,11 +3960,12 @@ and `gh run rerun <run> --failed` take. `cleanLog` drops the job column and
 timestamps and prints each step once as a heading. `linkPaths` then tries each
 path in the log from each of its folders down, with `path_exists`, so a CI path
 such as `/home/runner/work/app/app/tests/X.php` finds `tests/X.php`. While any
-check runs and the Checks tab is drawn, `watchChecks` reloads
-`statusCheckRollup` every 15 seconds and redraws only the checks list, so it
-never clears a comment you're typing. A hidden tab skips the reload but keeps
-the timer, and it stops once another pull request or a redraw replaces the
-list.
+check runs, `watchPullRequest` reads `statusCheckRollup` and
+`mergeStateStatus` every 15 seconds and redraws the whole tab when either
+changes, which keeps the status box and the counts current too. The redraw keeps
+the section, scroll, and draft, and it waits while the tab is hidden, a comment
+is being edited, or the comment box has focus. It stops once the tab shows
+another pull request or a newer drawing of this one.
 
 The Viewed checkboxes are GitHub's own (`viewerViewedState` on the pull
 request's `files` in GraphQL, changed by `markFileAsViewed` and
@@ -9925,3 +9940,11 @@ user code:
   with sections in tabs and the merge status beside them, as on GitHub.
 - The list stays in the sidebar, so you switch pull requests without going
   back.
+
+### 2026-11-21: Create pull requests in a form, not a terminal
+
+- `gh pr create` in a terminal asks its questions one at a time and can't show
+  the commits or the template while you write. The form shows both, and pushes
+  the branch through the same password dialog as other pushes.
+- The tab redraws whole when checks change, rather than only the checks list,
+  so the status box and counts never disagree with the list.

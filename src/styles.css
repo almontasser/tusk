@@ -806,6 +806,11 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .pr-thread-link:hover { background: var(--hover); }
 .pr-resolved { margin-left: auto; font: 11px var(--ui-family); color: var(--faint); }
 .pr-thread-comment { padding: 8px 14px; }
+.pr-hunk { margin: 0; padding: 6px 0; font: 12px/1.5 var(--mono); overflow-x: auto; border-bottom: 1px solid var(--border-subtle); background: var(--bg); }
+.pr-hunk div { padding: 0 14px; white-space: pre; }
+.pr-hunk .add { background: color-mix(in srgb, var(--green) 14%, transparent); }
+.pr-hunk .del { background: color-mix(in srgb, var(--red) 14%, transparent); }
+.pr-thread-card .pr-thread-more { display: block; padding: 8px 14px; }
 .pr-thread-comment + .pr-thread-comment { border-top: 1px solid var(--border-subtle); }
 .pr-small-event { display: flex; align-items: center; gap: 6px; padding: 0 0 0 38px; color: var(--muted); font-size: 12px; }
 .pr-small-event strong { color: var(--text); font-weight: 600; }
@@ -876,6 +881,19 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .pr-status-line button { height: 24px; padding: 0 8px; flex-shrink: 0; }
 .pr-status-text button { display: block; margin-top: 6px; }
 
+/* The New Pull Request tab. */
+.pane-editor > .pr-create.docked { overflow: auto; border-width: 0; background: var(--bg); }
+.pr-create-form, .pr-create-note { max-width: 860px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 12px; }
+.pr-create-form h1 { margin: 0; font-size: 20px; font-weight: 600; }
+.pr-create-form .pr-sub select { height: 24px; }
+.pr-create-form input:not([type]), .pr-create-form textarea { box-sizing: border-box; width: 100%; padding: 8px 10px; font: var(--ui); border-radius: 8px; }
+.pr-create-form input:not([type]) { font-size: 15px; }
+.pr-create-form textarea { min-height: 220px; resize: vertical; }
+.pr-create-form .pr-actions { justify-content: flex-end; align-items: center; margin: 0; }
+.pr-create-form button.primary { height: 28px; padding: 0 14px; border-radius: var(--radius); background: var(--accent); color: var(--on-accent); }
+.pr-create-draft { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; }
+.pr-create-form h3 { margin: 8px 0 0; font-size: 12px; font-weight: 600; color: var(--muted); }
+
 /* A narrow pane, such as a split editor: one column, with the status and side blocks above the sections. */
 @container (max-width: 760px) {
   .pr-grid { grid-template-columns: minmax(0, 1fr); padding: 12px 14px 24px; }
@@ -938,6 +956,8 @@ button.link:hover { text-decoration: underline; }
 #diff-files:not([hidden]) { display: flex; align-items: center; gap: 4px; min-width: 0; flex-shrink: 1; }
 #diff-files select { min-width: 60px; max-width: 280px; height: 26px; }
 #diff-files .muted { white-space: nowrap; }
+.diff-viewed { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; padding: 0 8px; height: 24px; border: 1px solid var(--border); border-radius: var(--radius); white-space: nowrap; }
+.diff-viewed:has(:checked) { color: var(--green); border-color: color-mix(in srgb, var(--green) 50%, transparent); }
 #diff-label { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #diff-label { margin-right: auto; }
 #diff-editor { flex: 1; min-height: 0; }
