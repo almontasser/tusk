@@ -4098,6 +4098,63 @@ version with the lines in your file, through the host's `replaceLines`, and
 replaces them in the editor as one undoable edit only when they match and the
 pull request's branch is checked out.
 
+#### Viewing diffs
+
+`diffdata.ts` holds the pure parts, which `diffdata.test.ts` tests:
+`imageType`, `mapLine`, `parseMergeTree`, and `parseNumstat`.
+
+**Diff options.** `git.ts` keeps three toggles (inline, ignore whitespace, and
+collapse unchanged regions) in `localStorage` under `diff-options`, and applies
+them to the one shared diff editor as Monaco's `renderSideBySide`,
+`ignoreTrimWhitespace`, and `hideUnchangedRegions`, at creation and on each
+click. Every diff goes through that editor, so the options apply everywhere.
+
+**Image diffs.** `showDiff` takes an optional pair of image sources: git
+objects such as `HEAD:logo.png`, or an absolute path for the working tree.
+`run_capture` decodes output as UTF-8 with replacement characters, so a blob's
+bytes come through `/bin/sh -c 'git cat-file blob "$1" | base64'`, with the
+object name as an argument rather than part of the script. Working-tree files
+use `read_file_bytes`. Both become object URLs, freed when the diff changes.
+`DiffFile.images` carries the sources for diffs of several files; commits,
+branches, and pull requests set it. Stashes don't, because a stashed new file
+can live in either of two commits.
+
+**Since your review.** A diff from the reviewed commit `R` to the head `H`
+includes the base branch's changes when the author merged the base in, or
+rebased, after the review. `sinceReview` compares the two merge bases with the
+base branch: `B1` for `R` and `B2` for `H`. When they differ, `git merge-tree
+--write-tree --merge-base=B1 R B2` writes a tree `T` that is `R` with the base's
+changes from `B1` to `B2` applied, without touching the index, the working
+tree, or any ref. `T..H` then holds only what the pull request changed since
+the review. Each file in `Since.files` carries its `from`: `T`, or `R` for a
+file that conflicted in the merge, whose `T` version has conflict markers.
+merge-tree exits with 1 on conflicts, so it runs through `gitOutput`. With git
+older than 2.40, which lacks `--merge-base`, it falls back to `R..H` filtered to
+the pull request's files. An interdiff of the two patches, or `git range-diff`,
+compares patches rather than file versions, which a two-sided Monaco diff can't
+show.
+
+**Threads in the editor.** A thread's `line` counts lines of the pull
+request's head. `decorateComments` reads the head's version of the file
+(`headRefOid`, cached per commit and path) and runs `lineChanges` from it to the
+model's current text, which covers unpushed commits and unsaved edits alike.
+`mapLine` moves each line through those blocks: a line in a changed block maps
+into its new lines, and a line that was only deleted hides its thread. Without
+the head commit locally, the lines stay GitHub's. Decorations map to thread IDs,
+so a click on a moved icon opens the right thread.
+
+**Large pull requests.** `gh pr view --json files,commits` returns at most 100
+of each (checked against `laravel/framework#61710`: 365 files and 142 commits,
+`gh` returned 100 and 100). `allFilesAndCommits` in `preditor.ts` fetches the
+full lists through GraphQL with `--paginate` when either list has 100 entries.
+`renderPullRequest` and `openThread` both use it.
+
+**Files tab tools.** **Mark All Viewed** confirms, then calls `setViewed` for
+four files at a time and reports the ones that failed. **Hide viewed** is kept
+in `localStorage`. V opens the first unviewed file; the tab's element outlives
+its redraws, so `nextUnviewedKey` adds one listener per element and keeps the
+latest Files tab's function in a `WeakMap`.
+
 ## Filament intelligence (milestone 6)
 
 Tusk's server completes Filament's fluent methods, such as

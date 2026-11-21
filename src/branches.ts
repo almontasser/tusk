@@ -172,6 +172,7 @@ async function diffWith(b: string, current: string) {
     path: f.path,
     status: f.status,
     load: async () => [f.status === "A" ? "" : await show(`${current}:${f.from ?? f.path}`), f.status === "D" ? "" : await show(`${b}:${f.path}`)],
+    images: [f.status === "A" ? "" : `${current}:${f.from ?? f.path}`, f.status === "D" ? "" : `${b}:${f.path}`],
   }));
   showDiffs(list, `${current} ↔ ${b}`);
 }

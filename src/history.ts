@@ -270,6 +270,7 @@ const diffFiles = (c: { hash: string; parents: string[] }, files: ChangedFile[])
     path: f.path,
     status: f.status,
     load: async () => [c.parents[0] && f.status !== "A" ? await show(`${c.parents[0]}:${f.from ?? f.path}`) : "", f.status === "D" ? "" : await show(`${c.hash}:${f.path}`)],
+    images: [c.parents[0] && f.status !== "A" ? `${c.parents[0]}:${f.from ?? f.path}` : "", f.status === "D" ? "" : `${c.hash}:${f.path}`],
   }));
 };
 

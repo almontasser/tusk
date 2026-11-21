@@ -13,6 +13,7 @@ import { errorText, showError, withProgress } from "./status";
 import { closeView, openTerminal, showEditorView } from "./terminal";
 import { historyActivity } from "./localhistory";
 import { isAbsolute, mod } from "./platform.ts";
+import { imageType } from "./diffdata.ts";
 
 type Host = {
   root(): string;
@@ -304,7 +305,8 @@ export async function showChange(f: FileStatus, inIndex: boolean) {
     title: `${inIndex ? "Unstage" : "Stage"} the changes that the selection touches (select lines on either side)`,
     run: stageSelected,
   };
-  showDiff(f.path, original, modified, inIndex ? "HEAD ↔ Staged" : f.worktree === "?" ? "New file" : "Staged ↔ Working tree", action);
+  const images: [string, string] = inIndex ? [`HEAD:${f.from ?? f.path}`, `:${f.path}`] : [`:${f.path}`, `${host.root()}/${f.path}`];
+  showDiff(f.path, original, modified, inIndex ? "HEAD ↔ Staged" : f.worktree === "?" ? "New file" : "Staged ↔ Working tree", action, images);
   staging = { f, inIndex, original, modified };
 }
 
@@ -370,8 +372,12 @@ async function writeIndex(path: string, text: string) {
 
 export type DiffAction = { label: string; title?: string; run(): unknown };
 
-/** Shows a diff in an editor tab, replacing the diff it showed before. `action` adds a button to the header, such as Stage Selected. */
-export function showDiff(path: string, original: string, modified: string, label: string, action?: DiffAction): monaco.editor.IStandaloneDiffEditor {
+/**
+ * Shows a diff in an editor tab, replacing the diff it showed before. `action` adds a button to the header, such as
+ * Stage Selected. For an image, `images` names where its old and new bytes are (see `imageUrl`), and the tab shows
+ * the two pictures instead of text.
+ */
+export function showDiff(path: string, original: string, modified: string, label: string, action?: DiffAction, images?: [string, string]): monaco.editor.IStandaloneDiffEditor {
   clearDiff();
   const button = $("diff-action");
   button.hidden = !action;
@@ -387,6 +393,7 @@ export function showDiff(path: string, original: string, modified: string, label
       fontSize: 13,
       fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, SF Mono, Menlo, Cascadia Mono, Consolas, DejaVu Sans Mono, monospace",
       minimap: { enabled: false },
+      ...monacoDiffOptions(diffOptions()),
     });
     diffEditor.getOriginalEditor().onDidFocusEditorText(() => (lastSide = "original"));
     diffEditor.getModifiedEditor().onDidFocusEditorText(() => (lastSide = "modified"));
@@ -397,6 +404,10 @@ export function showDiff(path: string, original: string, modified: string, label
     original: monaco.editor.createModel(original, undefined, uri("original")),
     modified: monaco.editor.createModel(modified, undefined, uri("modified")),
   });
+  const image = !!images && !!imageType(path);
+  if (image) showImages(path, images);
+  $("diff-editor").hidden = image;
+  $("diff-images").hidden = !image;
   $("diff-path").textContent = isAbsolute(path) ? path.split("/").pop()! : path;
   $("diff-label").textContent = label;
   // Paths are relative to the project, except files outside it, such as HTTP responses in the app's cache.
@@ -407,9 +418,9 @@ export function showDiff(path: string, original: string, modified: string, label
 
 /**
  * A file in a diff of several, such as a commit's or a stash's, loaded when you move to it. `extra` adds a control
- * after the file list, such as a pull request file's Viewed checkbox.
+ * after the file list, such as a pull request file's Viewed checkbox. `images` is `showDiff`'s, for image files.
  */
-export type DiffFile = { path: string; status?: string; load(): Promise<[string, string]>; show?(): Promise<boolean>; extra?(): HTMLElement };
+export type DiffFile = { path: string; status?: string; load(): Promise<[string, string]>; show?(): Promise<boolean>; extra?(): HTMLElement; images?: [string, string] };
 let diffFiles: { files: DiffFile[]; index: number; label: string } | undefined;
 
 /**
@@ -425,7 +436,7 @@ export async function showDiffs(files: DiffFile[], label: string, index = 0) {
   } else {
     const texts = await withProgress(`Loading the diff of ${f.path}…`, () => f.load(), { error: `Can't show the diff of ${f.path}` });
     if (!texts) return;
-    showDiff(f.path, texts[0], texts[1], label);
+    showDiff(f.path, texts[0], texts[1], label, undefined, f.images);
   }
   diffFiles = { files, index, label };
   const nav = $("diff-files");
@@ -471,6 +482,8 @@ function clearDiff() {
   diffFiles = undefined;
   $("diff-files").hidden = true;
   $("diff-action").hidden = true;
+  $("diff-images").replaceChildren();
+  imageUrls.splice(0).forEach((u) => URL.revokeObjectURL(u));
   const model = diffEditor?.getModel();
   diffEditor?.setModel(null);
   model?.original.dispose();
@@ -856,8 +869,102 @@ export function changeMenu(editor: monaco.editor.ICodeEditor, line: number): Men
   ];
 }
 
+// ---- Diff options and image diffs ----
+
+/** The diff header's toggles, kept in this computer's storage, for every diff: Git's, pull requests', and others. */
+type DiffOptions = { inline: boolean; ignoreWhitespace: boolean; collapse: boolean };
+const OPTIONS_KEY = "diff-options";
+
+function diffOptions(): DiffOptions {
+  let saved = {};
+  try {
+    saved = JSON.parse(localStorage.getItem(OPTIONS_KEY) ?? "{}");
+  } catch {
+    // Storage is off or holds something else; the defaults apply.
+  }
+  // Monaco ignores whitespace at the ends of lines by default, so diffs looked like that before the toggle.
+  return { inline: false, ignoreWhitespace: true, collapse: false, ...saved };
+}
+
+const monacoDiffOptions = (o: DiffOptions): monaco.editor.IDiffEditorOptions => ({
+  renderSideBySide: !o.inline,
+  ignoreTrimWhitespace: o.ignoreWhitespace,
+  hideUnchangedRegions: { enabled: o.collapse },
+});
+
+/** Draws the toggles in the diff's header. A click applies to the diff on screen and to every later one. */
+function drawDiffOptions() {
+  const options = diffOptions();
+  const toggle = (key: keyof DiffOptions, name: string, title: string) => {
+    const b = iconButton(name, title, () => {
+      options[key] = !options[key];
+      b.setAttribute("aria-pressed", String(options[key]));
+      try {
+        localStorage.setItem(OPTIONS_KEY, JSON.stringify(options));
+      } catch {
+        // Storage is off; the choice lasts until the app restarts.
+      }
+      diffEditor?.updateOptions(monacoDiffOptions(options));
+    });
+    b.setAttribute("aria-label", title);
+    b.setAttribute("aria-pressed", String(options[key]));
+    return b;
+  };
+  $("diff-options").replaceChildren(
+    toggle("inline", "diff-single", "Inline: show both versions in one column"),
+    toggle("ignoreWhitespace", "whitespace", "Ignore whitespace at the start and end of lines"),
+    toggle("collapse", "fold", "Collapse unchanged regions"),
+  );
+}
+
+/** The diff's image object URLs, freed when the diff changes. */
+const imageUrls: string[] = [];
+
+/**
+ * An image's bytes as an object URL, or "" when that side has no file. `source` is a git object, such as
+ * `HEAD:logo.png`, or `:logo.png` for the index, or an absolute path in the working tree. `run_capture` returns
+ * text, which would mangle the bytes, so git's output comes through base64. The object name is an argument of the
+ * shell, never part of its script, because paths in a pull request come from other people.
+ */
+async function imageUrl(source: string, type: string): Promise<string> {
+  if (!source) return "";
+  try {
+    let bytes: BlobPart;
+    if (isAbsolute(source)) bytes = await invoke<ArrayBuffer>("read_file_bytes", { path: source });
+    else {
+      const script = 'git --no-optional-locks cat-file -e "$1" || exit 1; git --no-optional-locks cat-file blob "$1" | base64';
+      const base64 = await invoke<string>("run_capture", { cwd: host.root(), program: "/bin/sh", args: ["-c", script, "sh", source], input: null });
+      bytes = Uint8Array.from(atob(base64.replace(/\s/g, "")), (c) => c.charCodeAt(0));
+    }
+    const url = URL.createObjectURL(new Blob([bytes], { type }));
+    imageUrls.push(url);
+    return url;
+  } catch {
+    return "";
+  }
+}
+
+/** Shows an image's old and new versions side by side, with their sizes. An SVG shown as an image runs no scripts. */
+function showImages(path: string, [before, after]: [string, string]) {
+  const type = imageType(path);
+  const side = (label: string, source: string) => {
+    const caption = h("figcaption", {}, label);
+    const figure = h("figure", { class: "diff-image" }, caption);
+    imageUrl(source, type).then((url) => {
+      if (!figure.isConnected) return;
+      if (!url) return figure.append(h("p", { class: "muted" }, "No file in this version."));
+      const img = h("img", { src: url, alt: `${path}, ${label.toLowerCase()}` });
+      img.onload = () => caption.append(h("span", { class: "muted" }, ` · ${img.naturalWidth} × ${img.naturalHeight}`));
+      figure.append(img);
+    });
+    return figure;
+  };
+  $("diff-images").replaceChildren(side("Before", before), side("After", after));
+}
+
 export function initGit(h: Host) {
   host = h;
+  drawDiffOptions();
   $("diff-close").onclick = closeDiff;
   $("diff").addEventListener("keydown", (e) => {
     if (!e.altKey || !mod(e) || !diffFiles || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
