@@ -4115,6 +4115,9 @@ objects such as `HEAD:logo.png`, or an absolute path for the working tree.
 bytes come through `/bin/sh -c 'git cat-file blob "$1" | base64'`, with the
 object name as an argument rather than part of the script. Working-tree files
 use `read_file_bytes`. Both become object URLs, freed when the diff changes.
+For an image, `showDiff` loads empty models and hides the header's action
+(Stage Selected, Comment on Line) and options, since the text is the bytes
+decoded as UTF-8.
 `DiffFile.images` carries the sources for diffs of several files; commits,
 branches, and pull requests set it. Stashes don't, because a stashed new file
 can live in either of two commits.
@@ -4128,9 +4131,9 @@ changes from `B1` to `B2` applied, without touching the index, the working
 tree, or any ref. `T..H` then holds only what the pull request changed since
 the review. Each file in `Since.files` carries its `from`: `T`, or `R` for a
 file that conflicted in the merge, whose `T` version has conflict markers.
-merge-tree exits with 1 on conflicts, so it runs through `gitOutput`. With git
-older than 2.40, which lacks `--merge-base`, it falls back to `R..H` filtered to
-the pull request's files. An interdiff of the two patches, or `git range-diff`,
+merge-tree exits with 1 on conflicts, so it runs through `gitOutput`, with `-z`
+so that paths aren't quoted. With a git that lacks `--merge-base`, it falls back
+to `R..H` filtered to the pull request's files. An interdiff of the two patches, or `git range-diff`,
 compares patches rather than file versions, which a two-sided Monaco diff can't
 show.
 
@@ -4146,12 +4149,14 @@ so a click on a moved icon opens the right thread.
 **Large pull requests.** `gh pr view --json files,commits` returns at most 100
 of each (checked against `laravel/framework#61710`: 365 files and 142 commits,
 `gh` returned 100 and 100). `allFilesAndCommits` in `preditor.ts` fetches the
-full lists through GraphQL with `--paginate` when either list has 100 entries.
-`renderPullRequest` and `openThread` both use it.
+full lists through GraphQL with `--paginate` when either list has 100 entries,
+and keeps them per head commit and base branch, because the page redraws after
+each Viewed tick. `renderPullRequest` and `openThread` both use it.
 
 **Files tab tools.** **Mark All Viewed** confirms, then calls `setViewed` for
 four files at a time and reports the ones that failed. **Hide viewed** is kept
-in `localStorage`. V opens the first unviewed file; the tab's element outlives
+in `localStorage`. **Next Unviewed** and V open the first unviewed file. The
+file list's type-ahead takes V while the list has focus. The tab's element outlives
 its redraws, so `nextUnviewedKey` adds one listener per element and keeps the
 latest Files tab's function in a `WeakMap`.
 

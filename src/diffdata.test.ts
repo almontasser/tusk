@@ -45,8 +45,9 @@ test("mapLine follows several changes", () => {
 });
 
 test("parseMergeTree reads the tree and the conflicted files", () => {
-  assert.deepEqual(parseMergeTree("bbf9917\nc.txt\nsrc/a b.php\n\nAuto-merging c.txt\nCONFLICT (content): Merge conflict in c.txt\n"), { tree: "bbf9917", conflicts: ["c.txt", "src/a b.php"] });
-  assert.deepEqual(parseMergeTree("ba24cb4\n"), { tree: "ba24cb4", conflicts: [] });
+  assert.deepEqual(parseMergeTree("bbf9917\0c.txt\0src/ü b.php\0"), { tree: "bbf9917", conflicts: ["c.txt", "src/ü b.php"] });
+  assert.deepEqual(parseMergeTree("ba24cb4\0"), { tree: "ba24cb4", conflicts: [] });
+  assert.deepEqual(parseMergeTree(""), { tree: "", conflicts: [] });
 });
 
 test("parseNumstat reads paths with tabs and binary files", () => {

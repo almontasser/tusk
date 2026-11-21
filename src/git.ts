@@ -379,6 +379,9 @@ export type DiffAction = { label: string; title?: string; run(): unknown };
  */
 export function showDiff(path: string, original: string, modified: string, label: string, action?: DiffAction, images?: [string, string]): monaco.editor.IStandaloneDiffEditor {
   clearDiff();
+  // An image's text is its bytes decoded as UTF-8, which nothing should read, stage, or comment on.
+  const image = !!images && !!imageType(path);
+  if (image) [original, modified, action] = ["", "", undefined];
   const button = $("diff-action");
   button.hidden = !action;
   button.textContent = action?.label ?? "";
@@ -404,9 +407,9 @@ export function showDiff(path: string, original: string, modified: string, label
     original: monaco.editor.createModel(original, undefined, uri("original")),
     modified: monaco.editor.createModel(modified, undefined, uri("modified")),
   });
-  const image = !!images && !!imageType(path);
-  if (image) showImages(path, images);
+  if (image) showImages(path, images!);
   $("diff-editor").hidden = image;
+  $("diff-options").hidden = image;
   $("diff-images").hidden = !image;
   $("diff-path").textContent = isAbsolute(path) ? path.split("/").pop()! : path;
   $("diff-label").textContent = label;
@@ -955,6 +958,8 @@ function showImages(path: string, [before, after]: [string, string]) {
       if (!url) return figure.append(h("p", { class: "muted" }, "No file in this version."));
       const img = h("img", { src: url, alt: `${path}, ${label.toLowerCase()}` });
       img.onload = () => caption.append(h("span", { class: "muted" }, ` · ${img.naturalWidth} × ${img.naturalHeight}`));
+      // Such as a Git LFS pointer, which the repository holds as text in place of the picture.
+      img.onerror = () => img.replaceWith(h("p", { class: "muted" }, "This version isn't an image Tusk can show."));
       figure.append(img);
     });
     return figure;

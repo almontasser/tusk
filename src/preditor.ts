@@ -112,18 +112,29 @@ const COMMITS = `query($owner: String!, $name: String!, $number: Int!, $endCurso
   repository(owner: $owner, name: $name) { pullRequest(number: $number) { commits(first: 100, after: $endCursor) { nodes { commit { oid messageHeadline committedDate authors(first: 10) { nodes { name user { login } } } } } pageInfo { hasNextPage endCursor } } } }
 }`;
 
+const fullLists = new Map<string, Promise<[Details["files"], Details["commits"]]>>();
+
 /**
  * `gh pr view --json files,commits` returns only the first 100 of each, so a larger pull request gets the rest from
- * GitHub's GraphQL API, a page of 100 at a time. Use it wherever the pull request's details load.
+ * GitHub's GraphQL API, a page of 100 at a time. Use it wherever the pull request's details load. The lists only
+ * change with the head and the base, so they're kept per head commit and base branch: the page redraws after
+ * every Viewed tick, and a large pull request would page through it all again.
  */
 export async function allFilesAndCommits(pr: Details): Promise<Details> {
-  const pages = (query: string, jq: string) => gh("api", "graphql", "--paginate", "-F", "owner={owner}", "-F", "name={repo}", "-F", `number=${pr.number}`, "-f", `query=${query}`, "--jq", jq).then((out) => out.split("\n").filter(Boolean).map((l) => JSON.parse(l)));
-  const [files, commits] = await Promise.all([
-    pr.files.length >= 100 ? pages(FILES, ".data.repository.pullRequest.files.nodes[] | tojson") : pr.files,
-    pr.commits.length >= 100
-      ? pages(COMMITS, ".data.repository.pullRequest.commits.nodes[].commit | {oid, messageHeadline, committedDate, authors: [.authors.nodes[] | {login: (.user.login // \"\"), name}]} | tojson")
-      : pr.commits,
-  ]);
+  if (pr.files.length < 100 && pr.commits.length < 100) return pr;
+  const key = `${pr.number}:${pr.headRefOid}:${pr.baseRefName}`;
+  if (!fullLists.has(key)) {
+    const pages = (query: string, jq: string) => gh("api", "graphql", "--paginate", "-F", "owner={owner}", "-F", "name={repo}", "-F", `number=${pr.number}`, "-f", `query=${query}`, "--jq", jq).then((out) => out.split("\n").filter(Boolean).map((l) => JSON.parse(l)));
+    const lists = Promise.all([
+      pr.files.length >= 100 ? pages(FILES, ".data.repository.pullRequest.files.nodes[] | tojson") : pr.files,
+      pr.commits.length >= 100
+        ? pages(COMMITS, ".data.repository.pullRequest.commits.nodes[].commit | {oid, messageHeadline, committedDate, authors: [.authors.nodes[] | {login: (.user.login // \"\"), name}]} | tojson")
+        : pr.commits,
+    ]);
+    // A failure is tried again next time.
+    fullLists.set(key, lists.catch((e) => (fullLists.delete(key), Promise.reject(e))));
+  }
+  const [files, commits] = await fullLists.get(key)!;
   return { ...pr, files, commits };
 }
 

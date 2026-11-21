@@ -26,11 +26,13 @@ export function mapLine(blocks: Block[], line: number): number | null {
   return line + shift;
 }
 
-/** `git merge-tree --write-tree --name-only`: the tree it wrote, and the files that conflicted. */
+/**
+ * `git merge-tree --write-tree -z --name-only --no-messages`: the tree it wrote, and the files that conflicted.
+ * Without -z, git quotes paths with characters other than ASCII, which then wouldn't match `git diff -z`'s.
+ */
 export function parseMergeTree(out: string): { tree: string; conflicts: string[] } {
-  const [tree, ...rest] = out.split("\n");
-  const end = rest.indexOf("");
-  return { tree: tree.trim(), conflicts: end < 0 ? rest : rest.slice(0, end) };
+  const [tree, ...conflicts] = out.split("\0").filter(Boolean);
+  return { tree: tree?.trim() ?? "", conflicts };
 }
 
 /** `git diff --numstat -z --no-renames`: each file's path and its added and deleted lines (0 for binary files). */

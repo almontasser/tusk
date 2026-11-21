@@ -387,14 +387,14 @@ export function sinceReview(pr: Details, oid: string): Promise<Since> {
       const baseThen = (await git("merge-base", oid, `refs/remotes/origin/${pr.baseRefName}`)).trim();
       if (baseThen === baseNow) return { oid, files: (await numstat(oid)).map((f) => ({ ...f, from: oid })) };
       // merge-tree exits with 1 when files conflict, which `git` treats as a failure, so it runs through gitOutput.
-      // --merge-base needs git 2.40; with an older git, or another failure, the diff keeps the base's changes but
-      // lists only the files the pull request changes.
-      const merged = await gitOutput(["merge-tree", "--write-tree", "--name-only", `--merge-base=${baseThen}`, oid, baseNow]);
-      if (merged.code > 1 || !/^[0-9a-f]{40,64}$/.test(merged.output.split("\n")[0])) {
+      // An older git without --merge-base, or another failure, leaves the base's changes in the diffs, but lists
+      // only the files the pull request changes.
+      const merged = await gitOutput(["merge-tree", "--write-tree", "-z", "--name-only", "--no-messages", `--merge-base=${baseThen}`, oid, baseNow]);
+      const { tree, conflicts } = parseMergeTree(merged.output);
+      if (merged.code > 1 || !/^[0-9a-f]{40,64}$/.test(tree)) {
         const own = new Set(pr.files.map((f) => f.path));
         return { oid, files: (await numstat(oid)).filter((f) => own.has(f.path)).map((f) => ({ ...f, from: oid })) };
       }
-      const { tree, conflicts } = parseMergeTree(merged.output);
       const conflicted = new Set(conflicts);
       const clean = (await numstat(tree)).filter((f) => !conflicted.has(f.path)).map((f) => ({ ...f, from: tree }));
       const rest = conflicts.length ? (await numstat(oid, conflicts)).map((f) => ({ ...f, from: oid })) : [];

@@ -70,7 +70,8 @@ commits, stashes, branches, and pull requests. With whitespace ignored, Stage
 Selected doesn't see whitespace-only changes, so they stay unstaged.
 
 The diff of a PNG, JPEG, GIF, SVG, or WebP file shows the old and new pictures
-side by side, with their sizes, in place of text.
+side by side, with their sizes, in place of text. Stash diffs show images as
+text.
 
 The editor marks lines that differ from the last commit in the gutter: green
 for added lines, blue for changed lines, and a gray triangle where lines were
@@ -356,7 +357,8 @@ diff's file list.
 
 To work through a large pull request:
 
-- Press V in the pull request's tab to open the first file you haven't viewed.
+- Click **Next Unviewed**, or press V in the pull request's tab, to open the
+  first file you haven't viewed.
 - Tick **Hide viewed** to list only the files you haven't viewed yet. Tusk
   remembers the choice.
 - Click **Mark All Viewed** to mark every file in the list as viewed on GitHub.

@@ -487,10 +487,13 @@ export async function renderPullRequest(number: number) {
       const label = el("label", "pr-hide-viewed");
       label.title = "Hide the files you've marked as viewed";
       label.append(box, " Hide viewed");
+      const next = el("button", "", "Next Unviewed");
+      next.title = "Open the first file you haven't viewed (V)";
+      next.onclick = () => openNextUnviewed();
       const all = el("button", "", "Mark All Viewed");
       all.title = "Mark every file in this list as viewed on GitHub";
       all.onclick = () => markAllViewed(all);
-      bar.append(label, all);
+      bar.append(label, next, all);
     }
     const markAllViewed = async (button: HTMLButtonElement) => {
       const rest = unviewed();
@@ -507,12 +510,13 @@ export async function renderPullRequest(number: number) {
       else host.status(`Marked ${rest.length} files of #${number} as viewed.`);
       if (entry!.section === "files") show("files");
     };
-    nextUnviewedKey(page, entry!, () => {
+    const openNextUnviewed = () => {
       if (!viewed.size) return host.status("GitHub didn't say which files you viewed.");
       const next = unviewed()[0];
       if (next) showFileDiff(pr, next.path, threads, undefined, since);
       else host.status(`You've viewed all ${list.length} files of #${number}.`);
-    });
+    };
+    nextUnviewedKey(page, entry!, openNextUnviewed);
     const unresolved = threads.filter((t) => t.line && !t.resolved);
     if (unresolved.length) {
       const next = el("button", "link", `Go to Unresolved (${unresolved.length})`);
