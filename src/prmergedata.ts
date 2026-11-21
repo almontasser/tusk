@@ -71,7 +71,9 @@ export function mergeActions(pr: MergeState, info: MergeInfo | null): MergeActio
     auto: open && !info.isMergeQueueEnabled && !pr.autoMergeRequest && info.viewerCanEnableAutoMerge && !readyToMerge(pr.mergeStateStatus),
     revert: pr.state === "MERGED" && canWrite(info),
     deleteBranch: sameRepo && info.headRef?.target?.oid === pr.headRefOid && canWrite(info),
-    restoreBranch: sameRepo && !info.headRef && info.viewerCanDeleteHeadRef,
+    // Not `viewerCanDeleteHeadRef`: GitHub reports it false once the branch is gone, which is exactly when Restore
+    // applies (seen live on almontasser/tusk#4). Write access is what creating the ref needs.
+    restoreBranch: sameRepo && !info.headRef && canWrite(info),
   };
 }
 

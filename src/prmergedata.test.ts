@@ -62,11 +62,13 @@ test("branch actions after merging skip forks and match whether the branch exist
   assert.deepEqual([mergeActions(merged, info).deleteBranch, mergeActions(merged, info).restoreBranch, mergeActions(merged, info).revert], [true, false, true]);
   // A branch with commits the pull request doesn't have is never offered for deletion.
   assert.equal(mergeActions(merged, { ...info, headRef: { id: "REF", target: { oid: "def456" } } }).deleteBranch, false);
-  const gone = { ...info, headRef: null };
+  // GitHub reports viewerCanDeleteHeadRef false once the branch is deleted, so Restore can't depend on it.
+  const gone = { ...info, headRef: null, viewerCanDeleteHeadRef: false };
   assert.deepEqual([mergeActions(merged, gone).deleteBranch, mergeActions(merged, gone).restoreBranch], [false, true]);
   const fork = { ...info, isCrossRepository: true };
   assert.deepEqual([mergeActions(merged, fork).deleteBranch, mergeActions(merged, { ...fork, headRef: null }).restoreBranch], [false, false]);
   assert.equal(mergeActions(merged, { ...info, baseRepository: { viewerPermission: "READ" } }).revert, false);
+  assert.equal(mergeActions(merged, { ...gone, baseRepository: { viewerPermission: "READ" } }).restoreBranch, false);
   assert.equal(mergeActions({ ...pr, state: "CLOSED" }, info).revert, false);
   assert.equal(mergeActions(pr, info).deleteBranch, false);
 });

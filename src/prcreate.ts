@@ -148,7 +148,8 @@ export async function createPullRequest() {
     const chips = el("div", "pr-create-chips");
     const add = el("button", "pr-create-add");
     add.type = "button";
-    add.title = add.ariaLabel = single ? `Choose a ${noun}` : `Add a ${noun}`;
+    const article = /^[aeiou]/.test(noun) ? "an" : "a";
+    add.title = add.ariaLabel = single ? `Choose ${article} ${noun}` : `Add ${article} ${noun}`;
     add.append(icon("add"));
     const draw = () => {
       chips.replaceChildren(
