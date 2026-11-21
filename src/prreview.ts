@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { latestLoads } from "./prdata";
 import { type Details, gh, host, type ReviewComment } from "./prshared";
+import { withSides } from "./prhunks";
 
 /**
  * Your pending review: GitHub's own, which only you can see until you submit it, so it's the same review in the
@@ -22,26 +23,32 @@ export const pendingOf = (number: number) => pendings.latest(key(number), () => 
 /** Loads your pending review of a pull request. GitHub lists a pending review only to its author. */
 export const loadPending = (number: number) => pendings.load(key(number), () => readPending(number));
 
-// ponytail: the first 100 pending comments and threads; a review with more shows the rest without their side.
-const PENDING = `query($id: ID!) { node(id: $id) { ... on PullRequestReview {
-  comments(first: 100) { nodes { databaseId path line startLine originalLine body author { login } createdAt replyTo { databaseId } } }
-  pullRequest { reviewThreads(first: 100) { nodes { diffSide comments(first: 100) { nodes { databaseId } } } } }
+// gh's --paginate follows $endCursor through every page of the review's comments, and of the threads.
+const PENDING = `query($id: ID!, $endCursor: String) { node(id: $id) { ... on PullRequestReview {
+  comments(first: 100, after: $endCursor) { nodes { databaseId path line startLine originalLine subjectType body author { login } createdAt replyTo { databaseId } } pageInfo { hasNextPage endCursor } }
 } } }`;
+const SIDES = `query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100, after: $endCursor) { nodes { diffSide comments(first: 1) { nodes { databaseId } } } pageInfo { hasNextPage endCursor } } } }
+}`;
 
 async function readPending(number: number): Promise<Pending | null> {
   const found = (await gh("api", `repos/{owner}/{repo}/pulls/${number}/reviews`, "--paginate", "--jq", '.[] | select(.state == "PENDING") | {id, node: .node_id}')).trim();
   if (!found) return null;
   const { id, node } = JSON.parse(found.split("\n")[0]);
   // REST lists a pending comment with only its diff position, no line, so its lines come from GraphQL, and its
-  // side from its thread.
-  const jq = `.data.node as $r | ($r.pullRequest.reviewThreads.nodes | map(.diffSide as $s | .comments.nodes[] | {key: (.databaseId | tostring), value: $s}) | from_entries) as $sides
-    | $r.comments.nodes[] | {id: .databaseId, path, line: (.line // .originalLine), start_line: .startLine, side: ($sides[.databaseId | tostring] // "RIGHT"), body, user: .author.login, in_reply_to_id: .replyTo.databaseId, created_at: .createdAt}`;
-  const out = await gh("api", "graphql", "-f", `query=${PENDING}`, "-f", `id=${node}`, "--jq", jq);
-  return { number, id, node, comments: out.split("\n").filter(Boolean).map((l) => JSON.parse(l)) };
+  // side from its thread. Each is its own query, since --paginate follows only one list's pages.
+  const jq = ".data.node.comments.nodes[] | {id: .databaseId, path, line: (.line // .originalLine), start_line: .startLine, subject: .subjectType, body, user: .author.login, in_reply_to_id: .replyTo.databaseId, created_at: .createdAt}";
+  const sides = ".data.repository.pullRequest.reviewThreads.nodes[] | [.comments.nodes[0].databaseId, .diffSide]";
+  const [out, threads] = await Promise.all([
+    gh("api", "graphql", "--paginate", "-f", `query=${PENDING}`, "-f", `id=${node}`, "--jq", jq),
+    gh("api", "graphql", "--paginate", "-F", "owner={owner}", "-F", "name={repo}", "-F", `number=${number}`, "-f", `query=${SIDES}`, "--jq", sides),
+  ]);
+  const rows = (text: string) => text.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  return { number, id, node, comments: withSides(rows(out), new Map(rows(threads))) };
 }
 
-/** A pending comment's place: its lines and side, as GitHub's REST API names them. */
-type Place = { path: string; line: number; side: "LEFT" | "RIGHT"; start_line?: number };
+/** A pending comment's place: its lines and side, as GitHub's REST API names them, or the whole file. */
+type Place = { path: string; line: number; side: "LEFT" | "RIGHT"; start_line?: number; file?: boolean };
 
 /**
  * Adds a comment to your pending review, starting one on the head commit when you have none. GitHub's REST API
@@ -50,7 +57,20 @@ type Place = { path: string; line: number; side: "LEFT" | "RIGHT"; start_line?: 
 export async function addPending(pr: Details, place: Place, body: string) {
   // This pull request's own review: the value its load returns, never what another pull request's load stored.
   const review = await pendingOf(pr.number);
-  if (!review) {
+  if (place.file) {
+    // REST's review comments take no comment on a whole file, so the review starts through GraphQL: without an
+    // event, addPullRequestReview leaves it pending.
+    const reviewId = review?.node ?? (await gh(
+      "api", "graphql",
+      "-f", "query=mutation($pr: ID!, $commit: GitObjectID!) { addPullRequestReview(input: { pullRequestId: $pr, commitOID: $commit }) { pullRequestReview { id } } }",
+      "-f", `pr=${pr.id}`, "-f", `commit=${pr.headRefOid}`, "--jq", ".data.addPullRequestReview.pullRequestReview.id",
+    )).trim();
+    await gh(
+      "api", "graphql",
+      "-f", "query=mutation($review: ID!, $path: String!, $body: String!) { addPullRequestReviewThread(input: { pullRequestReviewId: $review, path: $path, body: $body, subjectType: FILE }) { thread { id } } }",
+      "-f", `review=${reviewId}`, "-f", `path=${place.path}`, "-f", `body=${body}`,
+    );
+  } else if (!review) {
     const comment = { path: place.path, line: place.line, side: place.side, body, ...(place.start_line ? { start_line: place.start_line, start_side: place.side } : {}) };
     await invoke<string>("run_capture", {
       cwd: host.root(),

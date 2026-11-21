@@ -98,7 +98,7 @@ export function writer(text: HTMLTextAreaElement, repo: string, number: number) 
  * Whether a thread is resolved is only in GraphQL, keyed there by the first comment's ID.
  */
 export async function lineComments(number: number): Promise<Thread[]> {
-  const jq = ".[] | {id, path, line, start_line, side, body, user: .user.login, in_reply_to_id, created_at, diff_hunk}";
+  const jq = ".[] | {id, path, line, start_line, side, body, user: .user.login, in_reply_to_id, created_at, diff_hunk, subject_type}";
   const [out, states] = await Promise.all([
     gh("api", "--paginate", `repos/{owner}/{repo}/pulls/${number}/comments`, "--jq", jq),
     threadStates(number).catch(() => new Map<number, { id: string; resolved: boolean }>()),

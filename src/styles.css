@@ -3259,3 +3259,12 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .remote-note-actions { display: flex; gap: 12px; }
 .remote-empty { padding: 16px 14px; color: var(--muted); display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .remote-empty p { margin: 0; }
+
+/* Pull requests: diff commenting */
+.pr-diff-extras { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; white-space: nowrap; }
+.pr-diff-extras > button { height: 24px; padding: 0 8px; }
+.pr-diff-extras .diff-viewed { margin-left: 0; }
+.pr-no-add-glyph { cursor: not-allowed; }
+.pr-drag-range { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.pr-suggestion-pick { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.pr-comment-form textarea { resize: vertical; }

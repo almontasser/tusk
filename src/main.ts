@@ -2481,6 +2481,7 @@ initPullRequests({
     editor.revealLineInCenter(start);
     return true;
   },
+  save: (path) => saveFile(path),
 });
 initDatabase({ root: () => root, openFile, status });
 initDeployment({
