@@ -45,7 +45,7 @@ import { initLocalHistory, putLabel, recordExternalChanges, recordVersion, showD
 import { initLocalHistoryView } from "./localhistoryview";
 import { cancelQueries, chooseConnection, connectOverSsh, copyName, dataSources, generate as generateSql, initDatabase, loadTables, openConsole, openTable, selectedTable, showHistory } from "./database";
 import { afterSave as deployAfterSave, filesDeleted as deployFilesDeleted, remoteFileLabel, compareWithDeployed, deploymentMenu, deploymentProjectOpened, download, editServers, initDeployment, remoteHostShown, showTransfers, syncWithDeployed, upload } from "./deploy";
-import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
+import { branchChanged, createPullRequest, initPullRequests, loadPullRequests } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder, select as selectInTree, showMenu, type MenuItem } from "./files";
 import { initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, formatOnSave, initFormatting, setFormattersDialog } from "./format";
@@ -2465,6 +2465,7 @@ initPullRequests({
   root: () => root,
   status,
   showView,
+  moveTabToNextPane,
   openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }),
   async replaceLines(path, start, end, expected, text) {
     if (!(await openFile(path))) return false;
@@ -2576,7 +2577,7 @@ initLocalHistory({
   },
 });
 initLocalHistoryView({ root: () => root, openFile: (path) => openFile(path) });
-branchListeners.push(updateBranchPullRequest);
+branchListeners.push(branchChanged);
 
 $("open-folder").onclick = () => openFolder();
 

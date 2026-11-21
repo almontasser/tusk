@@ -513,6 +513,9 @@ and Redis keys, Data Sources, and the Profiler's table. Click a list or press Ta
 
 In a search box above a list, ↓ moves to the list.
 
+In the Pull Requests list, J and K also move down and up, and ⌘Enter opens the
+pull request in the next editor pane.
+
 ## Context menus
 
 Right-click the code for the actions at the caret, as in PhpStorm: context

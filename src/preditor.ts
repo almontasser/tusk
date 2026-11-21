@@ -8,25 +8,46 @@ import { showFileDiff } from "./prdiff";
 
 // ---- Current branch ----
 
+/** Counts branch changes, so a poll or a lookup for an earlier branch stops. */
+let branchLookups = 0;
+let checksPoll: ReturnType<typeof setInterval> | undefined;
+
 /** Shows the pull request for the current branch next to the branch name. */
 export async function updateBranchPullRequest() {
   const button = $("branch-pr");
+  const lookup = ++branchLookups;
+  clearInterval(checksPoll);
   button.hidden = true;
   if (!host.root()) return;
   try {
-    const pr: PullRequest = JSON.parse(await gh("pr", "view", "--json", FIELDS));
-    const checks = checksSummary(pr.statusCheckRollup);
-    button.innerHTML = `<span class="codicon codicon-git-pull-request"></span><span class="label"></span>`;
-    button.querySelector(".label")!.textContent = `#${pr.number} ${icons[checks]}`;
-    button.title = `${pr.title} (checks ${checks})`;
-    button.onclick = () => hub.showPullRequest(pr.number, pr.title);
-    button.hidden = false;
+    const pr = await showBranchPullRequest(lookup);
+    if (lookup !== branchLookups) return;
     branchThreads = { number: pr.number, threads: await lineComments(pr.number) };
   } catch {
     // No pull request for this branch, or no GitHub remote.
     branchThreads = undefined;
   }
   for (const model of monaco.editor.getModels()) decorateComments(model);
+}
+
+/**
+ * Looks up the branch's pull request and shows it on the status bar button. While its checks run, it looks again
+ * every 30 seconds when the window has focus, so the icon changes when they finish.
+ */
+async function showBranchPullRequest(lookup: number) {
+  const button = $("branch-pr");
+  const pr: PullRequest & { state: string } = JSON.parse(await gh("pr", "view", "--json", `${FIELDS},state`));
+  if (lookup !== branchLookups) return pr;
+  const checks = checksSummary(pr.statusCheckRollup);
+  button.innerHTML = `<span class="codicon codicon-git-pull-request"></span><span class="label"></span>`;
+  button.querySelector(".label")!.textContent = `#${pr.number} ${icons[checks]}`;
+  button.title = `${pr.title} (checks ${checks})`;
+  button.onclick = () => hub.showPullRequest(pr.number, pr.title);
+  button.hidden = false;
+  clearInterval(checksPoll);
+  if (checks === "pending" && pr.state === "OPEN")
+    checksPoll = setInterval(() => document.hasFocus() && showBranchPullRequest(lookup).catch(() => lookup === branchLookups && clearInterval(checksPoll)), 30_000);
+  return pr;
 }
 
 // ---- Comments in the editor ----

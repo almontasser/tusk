@@ -48,6 +48,8 @@ export type Host = {
   openAt(path: string, line: number): unknown;
   /** Replaces lines of a file in its editor, if they still read `expected`. False when they don't. */
   replaceLines(path: string, start: number, end: number, expected: string, text: string): Promise<boolean>;
+  /** Moves the tab in front to the next editor pane, splitting the editor right when there's only one. */
+  moveTabToNextPane?(): void;
 };
 
 export const $ = (id: string) => document.getElementById(id)!;

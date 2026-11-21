@@ -267,11 +267,40 @@ The **Pull Requests** tab lists the repository's pull requests through the
 GitHub CLI. Filter by open pull requests, ones you created, ones waiting for
 your review, or closed, merged, or all pull requests, and type in the search
 box to search them with GitHub's search syntax, such as `fix label:bug`. Each
-row shows check status (✓ passed, ✗ failed, ● running; open lists only), the review decision,
-the lines added and removed, when it last changed, and its labels. The **Open**
-list, without a search, is split into a review queue: **Waiting for your
-review**, **Yours**, and **Everyone else**. The list shows 50 at a time; **Load More** at the end shows 50 more. If the GitHub CLI isn't installed, or
-you aren't logged in, the tab says so and offers to fix it.
+row shows check status (✓ passed, ✗ failed, ● running), the review decision,
+the lines added and removed, when it last changed, and its labels. In the
+closed, merged, and all lists, the check status fills in as rows scroll into
+view. The **Open** list, without a search or filters, is split into a review
+queue: **Waiting for your review**, **Yours**, and **Everyone else**. The list
+shows 50 at a time; **Load More** at the end shows 50 more. If the GitHub CLI
+isn't installed, or you aren't logged in, the tab says so and offers to fix it.
+
+Click the funnel icon to sort by newest, recently
+updated, or most commented, and to filter by draft state, label, author,
+assignee, or base branch. Type `@me` for yourself. The filters show under the
+search box; click them to change them, or click × to clear them. Tusk remembers
+the sort and filters per project. To keep a search, choose **Save This
+Search…** and name it: the saved search, with its text and filters, then shows
+in the same menu. Choose **Delete a Saved Search…** to remove one.
+
+Click the globe icon to list your open pull requests in every
+repository: the ones waiting for your review, your own, and the ones assigned
+to you. A pull request from this project's repository opens in a tab; one from
+another repository opens in your browser. Click the icon again to go back to
+this repository's list.
+
+The badge on the **Pull Requests** icon in the activity bar counts this
+repository's open pull requests waiting for your review. It updates with the
+list, when you switch branches or projects, and every 5 minutes while Tusk has
+focus.
+
+In the list, press **J** and **K** to move down and up, **Enter** to open a pull
+request, and **⌘Enter** to open it in the next editor pane, splitting the
+editor when there's only one.
+
+While the current branch's pull request has checks running, its status bar
+button checks again every 30 seconds while Tusk has focus, so its icon changes
+when the checks finish.
 
 Click a pull request to open it in an editor tab, beside your files. Each pull
 request opens in its own tab, so you can keep several open at once and switch

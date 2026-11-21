@@ -149,6 +149,8 @@
           <header class="view-header">
             <span>Pull Requests</span>
             <div class="view-actions">
+              <button class="icon-button" id="pr-everywhere" title="Show your pull requests in every repository" aria-pressed="false"><span class="codicon codicon-globe"></span></button>
+              <button class="icon-button" id="pr-filters" title="Sort, filter, and saved searches" aria-label="Sort, filter, and saved searches"><span class="codicon codicon-filter"></span></button>
               <button class="icon-button" id="pr-refresh" title="Refresh"><span class="codicon codicon-refresh"></span></button>
               <button class="icon-button" id="pr-create" title="Create a pull request"><span class="codicon codicon-add"></span></button>
             </div>
@@ -166,6 +168,10 @@
             </div>
             <div class="pr-toolbar">
               <input id="pr-search" type="search" placeholder="Search pull requests" aria-label="Search pull requests" spellcheck="false" />
+            </div>
+            <div class="pr-toolbar" id="pr-filter-bar" hidden>
+              <button id="pr-filter-summary" class="pr-filter-summary" title="Change the filters"></button>
+              <button class="icon-button" id="pr-filter-clear" title="Clear the filters" aria-label="Clear the filters"><span class="codicon codicon-close"></span></button>
             </div>
             <ul id="pr-list" role="listbox" aria-label="Pull requests"></ul>
           </div>

@@ -3259,3 +3259,10 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .remote-note-actions { display: flex; gap: 12px; }
 .remote-empty { padding: 16px 14px; color: var(--muted); display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .remote-empty p { margin: 0; }
+
+/* Pull requests: list */
+#view-prs .icon-button.active { color: var(--accent); }
+#activitybar button[data-view="prs"][data-count]::after { background: var(--accent); }
+.pr-toolbar .pr-filter-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; padding: 2px 6px; border-radius: var(--radius); font-size: 12px; color: var(--muted); }
+.pr-toolbar .pr-filter-summary:hover { background: var(--hover); color: var(--text); }
+#pr-list .pr-checks:empty { display: none; }

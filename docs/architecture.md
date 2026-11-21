@@ -4098,6 +4098,44 @@ version with the lines in your file, through the host's `replaceLines`, and
 replaces them in the editor as one undoable edit only when they match and the
 pull request's branch is checked out.
 
+#### The list
+
+`prlistdata.ts` holds the list's pure logic, tested in `prlistdata.test.ts`: a
+`PrQuery` (state, sort, draft, label, author, assignee, base branch, and text)
+becomes `gh pr list` flags through `listArgs`. `gh pr list` has no `--sort`, so
+a sort other than newest goes into `--search` as `sort:updated-desc` or
+`sort:comments-desc`. `prlist.ts` keeps the query, without its text, and the
+scope in the project value `pullRequestList`, and saved searches in
+`pullRequestSearches`, both through `setProjectValue`.
+
+The Everywhere scope runs three `gh search prs` searches (`--review-requested`,
+`--author`, and `--assignee`, each `@me` and `--state=open`) and shows each pull
+request in the first section it belongs to. A row whose repository matches
+`gh repo view --json nameWithOwner` has its number as its key and opens in a
+tab; other rows have their URL as the key and open in the browser.
+
+The closed, merged, and all lists leave out `statusCheckRollup`, because GitHub
+times out building it for 50 closed pull requests. An `IntersectionObserver`
+collects the numbers of rows that scroll into view and sends them as one
+GraphQL query, one `pullRequest` alias per number (`checksQuery`), and the rows
+get their icons from `commits(last: 1)`'s `statusCheckRollup.state`. Results
+are kept until the list's query changes.
+
+The activity bar badge uses the button's `data-count`, as the Problems badge
+does, from `gh pr list --search review-requested:@me --json number`. It updates
+with the list (at most every 30 seconds), on each branch change, which includes
+a project switch, and every 5 minutes while the window has focus.
+
+J and K are caught in the capture phase on `#pr-list-view`, before `listNav`'s
+type-ahead, and sent to the list as ↓ and ↑. ⌘Enter opens the pull request and
+then calls the host's `moveTabToNextPane`, which works because opening an
+editor view makes it the active tab synchronously.
+
+`updateBranchPullRequest` in `preditor.ts` counts lookups so a branch change
+stops an earlier lookup and its poll. While the pull request is open and its
+checks are pending, it looks it up again every 30 seconds when the document
+has focus, without reloading its threads, and stops once the checks finish.
+
 ## Filament intelligence (milestone 6)
 
 Tusk's server completes Filament's fluent methods, such as
