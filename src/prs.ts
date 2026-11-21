@@ -1222,6 +1222,8 @@ function watchPullRequest(pr: Details) {
           const result = checksSummary(now.statusCheckRollup);
           if (checksSummary(pr.statusCheckRollup) === "pending" && result !== "pending") {
             updateBranchPullRequest();
+            // The list's row still shows the checks running.
+            if ($("pr-list").querySelector(`li.pr[data-key="${pr.number}"]`)) loadPullRequests();
             const failed = (now.statusCheckRollup as Check[]).filter((c) => checkState(c) === "failed").length;
             const visible = !page.hidden && !page.closest("[hidden]");
             const message = failed ? `${failed} ${failed === 1 ? "check" : "checks"} failed on #${pr.number}.` : `Checks passed on #${pr.number}.`;
