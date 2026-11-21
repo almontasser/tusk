@@ -169,7 +169,16 @@ export function lineChanges(before: string[], after: string[]): LineChange[] {
 }
 
 /** One entry of `statusCheckRollup` from `gh pr list/view --json`: a check run or a commit status. */
-export type Check = { name?: string; context?: string; status?: string; conclusion?: string; state?: string; detailsUrl?: string; targetUrl?: string };
+export type Check = { name?: string; context?: string; status?: string; conclusion?: string; state?: string; detailsUrl?: string; targetUrl?: string; workflowName?: string; startedAt?: string; completedAt?: string };
+
+/** How long a check ran, such as "1m 5s", or has run so far when it hasn't finished. Empty without a start time. */
+export function checkDuration(c: Check, now = Date.now()): string {
+  const start = Date.parse(c.startedAt ?? "");
+  const end = c.completedAt && !c.completedAt.startsWith("0001") ? Date.parse(c.completedAt) : now;
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return "";
+  const s = Math.round((end - start) / 1000);
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+}
 export type CheckState = "passed" | "failed" | "pending" | "skipped";
 
 export function checkState(c: Check): CheckState {

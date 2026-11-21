@@ -280,6 +280,14 @@ and **Merge…**. Tabs switch between **Conversation**, **Commits**, **Checks**,
 and **Files**, each with a count; refreshing keeps the tab and your place in
 it. In a narrow pane, such as a split editor, the page becomes one column.
 
+When the tab has focus and you aren't typing, press **1** to **4** to switch
+sections, **R** to refresh, **C** to go to the comment box, and **O** to open
+the pull request in your browser.
+
+A dot and a bold title in the list mark a pull request that changed since you
+last opened it, such as a new comment, review, or push. Pull requests you
+haven't opened aren't marked.
+
 The column beside the tabs shows the status box, the reviewers (✓ approved,
 ✗ changes requested, ● still asked to review), and the labels. The gear next
 to **Reviewers** requests a review, and the one next to **Labels** adds or
@@ -300,9 +308,10 @@ with it:
 
 ### Checks
 
-Checks list failed ones first, and the bar above them counts them by state.
-While some checks fail or run, passed and skipped ones fold into a **Show**
-link. While checks run, and for the first two minutes of a new pull request, before
+Checks are grouped by workflow, with the workflows that have failures first,
+and the bar above them counts them by state. A workflow whose checks all passed
+folds into one line; click it to open it. Each check shows how long it ran, or
+has been running. While checks run, and for the first two minutes of a new pull request, before
 GitHub queues its checks, the tab checks them every 15 seconds and redraws when
 they finish or the merge state changes, so the checks, the status box, and the
 counts stay current; it waits while you type a comment.
@@ -328,6 +337,10 @@ diff's file list.
 
 Click a commit to see its own diff.
 
+With more than five files, the Files tab groups them under their folders, and
+with more than eight it has a box that filters them by path. Press ↓ in the box
+to move to the list.
+
 ### Conversation
 
 Descriptions and comments render as GitHub Markdown, and their links open in
@@ -337,7 +350,9 @@ your browser. `#123` links to that issue or pull request, and
 Line comments appear in the conversation under the file and lines they're on,
 with the last lines of code they're about. Click the file name to open the diff
 at that line. Resolved threads are folded; click **Show resolved comments** to
-read them. If you wrote the pull request, its description has **Edit** too. In the diff, each thread shows under
+read them. Each thread has **Reply** and **Resolve** links, as in the diff, so
+you can answer a thread without opening the code. If you wrote the pull
+request, its description has **Edit** too. In the diff, each thread shows under
 its line, with **Reply** and **Resolve** links. A resolved thread shows as one
 line; click **Show** to read it or **Unresolve** to reopen it. In the Files
 tab, **Go to Unresolved** opens the first unresolved thread, and **Next

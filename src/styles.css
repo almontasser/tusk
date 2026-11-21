@@ -748,6 +748,8 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .pr-row-text .pr-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pr-row-text .pr-meta .codicon { font-size: 12px; vertical-align: -2px; }
 .pr-row-text .pr-label { font-size: 10px; padding: 0 5px; }
+#pr-list li.pr.unseen .pr-title { font-weight: 700; }
+#pr-list li.pr.unseen .pr-title::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--accent); vertical-align: 1px; }
 .pr-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .pr-problem { padding: 8px 12px; display: block !important; }
 .pr-problem button { margin-top: 8px; }
@@ -763,6 +765,7 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 
 /* The pull request's editor tab. */
 .pane-editor > #pr-detail.docked { overflow: auto; background: var(--bg); container-type: inline-size; }
+#pr-detail:focus { outline: none; }
 #pr-detail > * { max-width: 1180px; margin-left: auto; margin-right: auto; }
 .pr-loading { padding: 24px; }
 .pr-head { display: flex; gap: 16px; align-items: flex-start; padding: 20px 24px 14px; border-bottom: 1px solid var(--border-subtle); }
@@ -811,6 +814,11 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .pr-hunk .add { background: color-mix(in srgb, var(--green) 14%, transparent); }
 .pr-hunk .del { background: color-mix(in srgb, var(--red) 14%, transparent); }
 .pr-thread-card .pr-thread-more { display: block; padding: 8px 14px; }
+.pr-thread-footer { display: flex; gap: 14px; padding: 6px 14px 8px; border-top: 1px solid var(--border-subtle); }
+.pr-thread-reply { padding: 8px 14px 10px; border-top: 1px solid var(--border-subtle); }
+.pr-thread-reply textarea { display: block; width: 100%; box-sizing: border-box; min-height: 60px; resize: vertical; padding: 6px 8px; font: var(--ui); border-radius: 6px; }
+.pr-thread-reply .pr-actions { justify-content: flex-end; margin-top: 6px; }
+.pr-thread-reply button.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; }
 .pr-thread-comment + .pr-thread-comment { border-top: 1px solid var(--border-subtle); }
 .pr-small-event { display: flex; align-items: center; gap: 6px; padding: 0 0 0 38px; color: var(--muted); font-size: 12px; }
 .pr-small-event strong { color: var(--text); font-weight: 600; }
@@ -846,6 +854,11 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .pr-rows .hash { font: 12px var(--mono); color: var(--faint); }
 .pr-rows .pr-when { white-space: nowrap; color: var(--faint); font-size: 12px; }
 .pr-path .dir { color: var(--faint); }
+.pr-files.grouped .pr-path .dir { display: none; }
+.pr-files.grouped li:not(.pr-dir) { padding-left: 32px; }
+.pr-dir { font-size: 12px; color: var(--muted); background: color-mix(in srgb, var(--text) 3%, transparent); min-height: 26px !important; }
+.pr-dir .pr-row-main { direction: rtl; text-align: left; }
+.pr-file-filter { width: 200px; height: 26px; }
 .pr-path .file { font-weight: 500; }
 .pr-files li.viewed .pr-path { opacity: 0.5; }
 .pr-files input[type="checkbox"] { margin: 0; flex-shrink: 0; }
@@ -857,7 +870,9 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .pr-diffbar span { width: 7px; height: 7px; border-radius: 1px; background: var(--hover); }
 .pr-diffbar .a { background: var(--green); }
 .pr-diffbar .d { background: var(--red); }
-.pr-fold { justify-content: center; }
+.pr-check-group { font-weight: 600; background: color-mix(in srgb, var(--text) 3%, transparent); cursor: default; }
+.pr-check-group .muted { font-weight: 400; font-size: 12px; }
+.pr-checks .pr-check-group ~ .pr-check { padding-left: 34px; }
 .log-link { color: var(--accent); text-decoration: underline; cursor: pointer; }
 
 /* Side column */

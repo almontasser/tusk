@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { monaco } from "./editor";
 import { type DiffFile, diffCursor, git, gitOutput, gitStatus, gitTask, showDiff, showDiffs, showOutput } from "./git";
-import { actionsJob, age, type Check, checkState, checksSummary, cleanLog, sortChecks, suggestion } from "./gitparse";
+import { actionsJob, age, type Check, checkDuration, checkState, checksSummary, cleanLog, sortChecks, suggestion } from "./gitparse";
 import { showCommitDiff } from "./history";
 import { confirm, pick } from "./palette";
 import { listNav } from "./listnav";
@@ -138,12 +138,13 @@ export async function loadPullRequests() {
     const fields = state.length ? LIST_FIELDS.replace(",statusCheckRollup", "") : LIST_FIELDS;
     const prs: ListedPullRequest[] = JSON.parse(await gh("pr", "list", "--limit", String(limit), "--json", fields, ...args));
     if ($("pr-list").dataset.key !== key) return; // A newer search replaced this one.
+    const seenAt = seen();
     const more = el("li", "pr-more");
     const button = el("button", "", "Load More");
     button.onclick = () => ((limit += 50), (button.disabled = true), (button.textContent = "Loading…"), loadPullRequests());
     more.append(button);
     $("pr-list").replaceChildren(
-      ...(prs.length ? prs.map(prRow) : [el("li", "muted", text ? "No pull requests match the search." : "No pull requests.")]),
+      ...(prs.length ? prs.map((pr) => prRow(pr, seenAt)) : [el("li", "muted", text ? "No pull requests match the search." : "No pull requests.")]),
       // gh has no offset, so Load More asks for a longer list; a full page means there may be more.
       ...(prs.length === limit ? [more] : []),
     );
@@ -205,7 +206,28 @@ function avatar(login: string, repo: string, size = 20) {
   return box;
 }
 
-function prRow(pr: ListedPullRequest) {
+/**
+ * When you last saw each pull request you opened, by its `updatedAt` then, per project. Kept in this computer's
+ * storage; losing it only loses the marks.
+ */
+const seenKey = () => `pr-seen:${host.root()}`;
+function seen(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(seenKey()) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+function markSeen(number: number, updatedAt: string) {
+  try {
+    localStorage.setItem(seenKey(), JSON.stringify({ ...seen(), [number]: updatedAt }));
+  } catch {
+    // Storage is off; the list just doesn't mark new activity.
+  }
+  $("pr-list").querySelector(`li.pr[data-key="${number}"]`)?.classList.remove("unseen");
+}
+
+function prRow(pr: ListedPullRequest, seenAt: Record<string, string> = {}) {
   const li = el("li", "pr");
   li.role = "option";
   li.dataset.key = String(pr.number);
@@ -225,6 +247,12 @@ function prRow(pr: ListedPullRequest) {
   text.append(title, meta);
   li.append(state, text);
   li.title = `#${pr.number} ${pr.title}\n${pr.headRefName} → ${pr.baseRefName} · +${pr.additions} −${pr.deletions}`;
+  // A pull request you opened before, which changed since, as GitHub marks unread notifications.
+  const before = seenAt[pr.number];
+  if (before && Date.parse(pr.updatedAt) > Date.parse(before)) {
+    li.classList.add("unseen");
+    li.title += "\nNew activity since you last opened it";
+  }
   li.onclick = () => showPullRequest(pr.number, pr.title);
   return li;
 }
@@ -282,6 +310,7 @@ async function renderPullRequest(number: number) {
   await libraries;
   if (page.dataset.number !== String(number)) return; // Another pull request opened meanwhile.
   viewedOf = { number, files: viewed };
+  markSeen(number, pr.updatedAt);
   const open = pr.state === "OPEN";
   const reload = () => renderPullRequest(number);
   // Runs a `gh` command that changes the pull request, then shows it again.
@@ -360,6 +389,7 @@ async function renderPullRequest(number: number) {
   const tab = (s: Section, label: string, count: number | string, name: string, alert = false) => {
     const b = el("button");
     b.role = "tab";
+    b.title = `${label} (${tabs.childElementCount + 1})`;
     b.dataset.section = s;
     b.append(icon(name), ` ${label} `, el("span", `pr-count${alert ? " alert" : ""}`, String(count)));
     b.onclick = () => show(s);
@@ -420,12 +450,44 @@ async function renderPullRequest(number: number) {
         draw();
         return card;
       });
+      // Reply and Resolve, as under a thread in the diff. Reply opens a box in the card.
+      const footer = el("div", "pr-thread-footer");
+      const link = (label: string, run: () => unknown) => {
+        const b = el("button", "link", label);
+        b.onclick = run;
+        footer.append(b);
+      };
+      if (t.line || t.node) {
+        link(pending?.number === number && t.node ? "Reply (joins your review)" : "Reply", () => {
+          const form = el("div", "pr-thread-reply");
+          const text = el("textarea");
+          text.placeholder = `Reply to ${t.user} (Markdown)`;
+          const send = el("button", "primary", "Reply");
+          const cancel = el("button", "", "Cancel");
+          const buttons = el("div", "pr-actions");
+          buttons.append(cancel, send);
+          cancel.onclick = () => form.replaceWith(footer);
+          send.onclick = async () => {
+            if (!text.value.trim()) return text.focus();
+            send.disabled = true;
+            await replyTo(number, t, text.value.trim()).catch((e) => (showError("Can't reply", e), (send.disabled = false)));
+          };
+          text.onkeydown = (e) => {
+            if (e.key === "Enter" && mod(e)) send.click();
+            if (e.key === "Escape") cancel.click();
+          };
+          form.append(text, buttons);
+          footer.replaceWith(form);
+          text.focus();
+        });
+        if (t.node) link(t.resolved ? "Unresolve" : "Resolve", () => setResolved(number, t, !t.resolved));
+      }
       // A resolved thread is folded, as on GitHub, until you open it.
       if (t.resolved && !expanded.has(t.id)) {
         const open = el("button", "link pr-thread-more", `Show ${comments.length} resolved ${comments.length === 1 ? "comment" : "comments"}`);
-        open.onclick = () => (expanded.add(t.id), open.replaceWith(...comments));
+        open.onclick = () => (expanded.add(t.id), open.replaceWith(...comments, footer));
         box.append(open);
-      } else box.append(...comments);
+      } else box.append(...comments, footer);
       const row = el("div", "pr-event");
       row.append(avatar(t.user, repo, 28), box);
       timeline.push({ at: t.created_at, node: row });
@@ -583,7 +645,7 @@ async function renderPullRequest(number: number) {
     files.role = "listbox";
     files.ariaLabel = "Files";
     listNav(files);
-    for (const f of pr.files) {
+    const rows = pr.files.map((f) => {
       const li = el("li");
       li.role = "option";
       li.dataset.key = f.path;
@@ -623,7 +685,39 @@ async function renderPullRequest(number: number) {
       }
       li.append(el("span", "added", `+${f.additions}`), el("span", "deleted", `−${f.deletions}`), diffBar(f.additions, f.deletions));
       li.onclick = () => showFileDiff(pr, f.path, threads);
-      files.append(li);
+      return { path: f.path, li };
+    });
+    // Many files group under their folders, as in GitHub's file tree, and a box filters them by path.
+    const grouped = pr.files.length > 5;
+    files.classList.toggle("grouped", grouped);
+    const draw = (query: string) => {
+      const q = query.trim().toLowerCase();
+      const shown = rows.filter((r) => r.path.toLowerCase().includes(q));
+      if (!grouped) return files.replaceChildren(...shown.map((r) => r.li));
+      const dirs = new Map<string, HTMLElement[]>();
+      for (const r of shown) {
+        const dir = r.path.includes("/") ? r.path.slice(0, r.path.lastIndexOf("/")) : "";
+        dirs.set(dir, [...(dirs.get(dir) ?? []), r.li]);
+      }
+      files.replaceChildren(
+        ...[...dirs].sort(([a], [b]) => a.localeCompare(b)).flatMap(([dir, lis]) => {
+          const head = el("li", "pr-dir");
+          head.append(icon("folder", "muted"), el("span", "pr-row-main", ltr(dir || "(root)")), el("span", "muted", String(lis.length)));
+          return [head, ...lis];
+        }),
+      );
+      if (!shown.length) files.replaceChildren(el("li", "muted", "No files match."));
+    };
+    draw("");
+    if (pr.files.length > 8) {
+      const filter = el("input");
+      filter.type = "search";
+      filter.placeholder = "Filter files";
+      filter.ariaLabel = "Filter files";
+      filter.className = "pr-file-filter";
+      filter.oninput = () => draw(filter.value);
+      filter.onkeydown = (e) => e.key === "ArrowDown" && (e.preventDefault(), files.focus());
+      bar.prepend(filter);
     }
     return [bar, files];
   }
@@ -654,6 +748,22 @@ async function renderPullRequest(number: number) {
   grid.append(main, side);
   page.replaceChildren(head, grid);
   page.dataset.shown = String(number);
+  // Keys while the tab has focus and you aren't typing: 1–4 switch sections, R refreshes, C goes to the comment
+  // box, and O opens the pull request in the browser.
+  page.tabIndex = -1;
+  page.onkeydown = (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement).closest("input, textarea, select, [contenteditable]")) return;
+    const order: Section[] = ["conversation", "commits", "checks", "files"];
+    const key = e.key.toLowerCase();
+    if (/^[1-4]$/.test(key)) show(order[Number(key) - 1]);
+    else if (key === "r") reload();
+    else if (key === "o") openUrl(pr.url);
+    else if (key === "c") {
+      if (section !== "conversation") show("conversation");
+      page.querySelector<HTMLTextAreaElement>(".pr-composer textarea")?.focus();
+    } else return;
+    e.preventDefault();
+  };
   show(section);
   page.scrollTop = scroll;
   watchPullRequest(pr);
@@ -756,15 +866,16 @@ function reviewerList(pr: Details, repo: string) {
   return list;
 }
 
-/** Pull requests whose passed and skipped checks you opened, which are folded while others failed or run. */
-const unfolded = new Set<number>();
+/** Workflows whose checks you opened, by pull request and workflow name; a workflow that all passed is folded. */
+const unfolded = new Set<string>();
 
-/** Draws the checks, failed first, with a log link on failed GitHub Actions jobs and Re-run Failed in the bar. */
+/**
+ * Draws the checks grouped by workflow, the groups with failures first, each check with how long it ran, a log
+ * button on failed GitHub Actions jobs, and Re-run Failed in the bar. A workflow whose checks all passed or were
+ * skipped folds into its heading until you open it.
+ */
 function drawChecks(pr: Details, list: HTMLElement, bar: HTMLElement) {
   const sorted = sortChecks(pr.statusCheckRollup ?? []);
-  const done = sorted.filter((c) => ["passed", "skipped"].includes(checkState(c)));
-  const fold = done.length > 3 && done.length < sorted.length && !unfolded.has(pr.number);
-  const all = fold ? sorted.filter((c) => !done.includes(c)) : sorted;
   const counts = { failed: 0, pending: 0, passed: 0, skipped: 0 };
   sorted.forEach((c) => counts[checkState(c)]++);
   bar.replaceChildren();
@@ -775,7 +886,7 @@ function drawChecks(pr: Details, list: HTMLElement, bar: HTMLElement) {
       bar.append(part);
     }
   if (!sorted.length) bar.append(el("span", "muted", "No checks"));
-  const failedRuns = [...new Set(all.filter((c) => checkState(c) === "failed").map((c) => actionsJob(c.detailsUrl)?.run).filter((r): r is string => !!r))];
+  const failedRuns = [...new Set(sorted.filter((c) => checkState(c) === "failed").map((c) => actionsJob(c.detailsUrl)?.run).filter((r): r is string => !!r))];
   if (failedRuns.length) {
     const rerun = el("button", "", "Re-run Failed");
     rerun.title = "Run the failed GitHub Actions jobs again";
@@ -787,44 +898,59 @@ function drawChecks(pr: Details, list: HTMLElement, bar: HTMLElement) {
     };
     bar.append(rerun);
   }
-  list.replaceChildren(
-    ...all.map((c) => {
-      const state = checkState(c);
-      const li = el("li");
-      li.role = "option";
-      const name = c.name ?? c.context ?? "";
-      li.dataset.key = name;
-      li.title = name;
-      const text = el("span", "pr-row-main");
-      text.append(name);
-      const workflow = (c as { workflowName?: string }).workflowName;
-      if (workflow) text.append(el("span", "muted", ` · ${workflow}`));
-      li.append(checkIcon(state), text);
-      const job = actionsJob(c.detailsUrl);
-      if (job && state === "failed") {
-        const log = el("button", "icon-button codicon codicon-output");
-        log.title = "View Log: the failed steps, with file paths that open in the editor";
-        log.onclick = (e) => (e.stopPropagation(), showLog(name, job.job));
-        li.append(log);
-      }
-      const url = c.detailsUrl ?? c.targetUrl;
-      if (url) {
-        const out = el("button", "icon-button codicon codicon-link-external");
-        out.title = "Open in Browser";
-        out.onclick = (e) => (e.stopPropagation(), openUrl(url));
-        li.append(out);
-        li.onclick = () => (job && state === "failed" ? showLog(name, job.job) : openUrl(url));
-      }
-      return li;
-    }),
-  );
-  if (fold) {
-    const li = el("li", "pr-fold");
-    const show = el("button", "link", `Show ${done.length} passed and skipped`);
-    show.onclick = () => (unfolded.add(pr.number), drawChecks(pr, list, bar));
-    li.append(show);
-    list.append(li);
+  const row = (c: Check) => {
+    const state = checkState(c);
+    const li = el("li", "pr-check");
+    li.role = "option";
+    const name = c.name ?? c.context ?? "";
+    li.dataset.key = name;
+    li.title = name;
+    li.append(checkIcon(state), el("span", "pr-row-main", name));
+    const took = checkDuration(c);
+    if (took) li.append(el("span", "pr-when", state === "pending" ? `running ${took}` : took));
+    const job = actionsJob(c.detailsUrl);
+    if (job && state === "failed") {
+      const log = el("button", "icon-button codicon codicon-output");
+      log.title = "View Log: the failed steps, with file paths that open in the editor";
+      log.onclick = (e) => (e.stopPropagation(), showLog(name, job.job));
+      li.append(log);
+    }
+    const url = c.detailsUrl ?? c.targetUrl;
+    if (url) {
+      const out = el("button", "icon-button codicon codicon-link-external");
+      out.title = "Open in Browser";
+      out.onclick = (e) => (e.stopPropagation(), openUrl(url));
+      li.append(out);
+      li.onclick = () => (job && state === "failed" ? showLog(name, job.job) : openUrl(url));
+    }
+    return li;
+  };
+  // Checks by workflow; commit statuses, such as a CI service's, have none.
+  const groups = new Map<string, Check[]>();
+  for (const c of sorted) {
+    const key = c.workflowName || (c.context ? "Commit statuses" : "Other checks");
+    groups.set(key, [...(groups.get(key) ?? []), c]);
   }
+  if (groups.size < 2) return list.replaceChildren(...sorted.map(row));
+  const rows: HTMLElement[] = [];
+  // The order of `sorted` already puts the group with the first failure first.
+  for (const [name, checks] of groups) {
+    const state = checksSummary(checks);
+    const key = `${pr.number}:${name}`;
+    const open = state === "failed" || state === "pending" || unfolded.has(key);
+    const head = el("li", "pr-check-group");
+    head.role = "option";
+    head.dataset.key = name;
+    const n = (s: string) => checks.filter((c) => checkState(c) === s).length;
+    const parts = [n("failed") && `${n("failed")} failed`, n("pending") && `${n("pending")} running`, n("passed") && `${n("passed")} passed`, n("skipped") && `${n("skipped")} skipped`].filter(Boolean);
+    head.append(icon(open ? "chevron-down" : "chevron-right", "muted"), checkIcon(state), el("span", "pr-row-main", name), el("span", "muted", parts.join(", ")));
+    head.onclick = () => (unfolded.has(key) ? unfolded.delete(key) : unfolded.add(key), drawChecks(pr, list, bar));
+    // A workflow with failures stays open; its heading folds nothing.
+    if (state === "failed" || state === "pending") head.onclick = null;
+    rows.push(head);
+    if (open) rows.push(...checks.map(row));
+  }
+  list.replaceChildren(...rows);
 }
 
 /**
@@ -1152,15 +1278,36 @@ function commentBlock(user: string, body: string, target: Target, repo: string, 
 }
 
 /** Resolves or reopens a thread on GitHub. */
-async function setResolved(t: Thread, resolved: boolean) {
+async function setResolved(number: number, t: Thread, resolved: boolean) {
   const mutation = resolved ? "resolveReviewThread" : "unresolveReviewThread";
   try {
     await gh("api", "graphql", "-f", `query=mutation($id: ID!) { ${mutation}(input: { threadId: $id }) { thread { isResolved } } }`, "-f", `id=${t.node}`);
-    shown!.threads = await lineComments(shown!.pr.number);
-    drawZones();
+    await threadsChanged(number);
   } catch (e) {
     showError(`Can't ${resolved ? "resolve" : "reopen"} the thread`, e);
   }
+}
+
+/** Redraws the threads wherever the pull request shows them: its diff and its tab. */
+async function threadsChanged(number: number) {
+  if (shown?.pr.number === number) (shown.threads = await lineComments(number).catch(() => shown!.threads)), drawZones();
+  if (openNumber === number) renderPullRequest(number);
+}
+
+/**
+ * Replies to a thread. With a pending review, GitHub takes no comment outside it, so the reply joins the review, as
+ * on GitHub; otherwise it posts at once.
+ */
+async function replyTo(number: number, t: Thread, body: string) {
+  if (pending?.number === number && t.node) {
+    await gh("api", "graphql", "-f", "query=mutation($review: ID!, $thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewId: $review, pullRequestReviewThreadId: $thread, body: $body }) { comment { id } } }", "-f", `review=${pending.node}`, "-f", `thread=${t.node}`, "-f", `body=${body}`);
+    await loadPending(number);
+    host.status("Added the reply to your pending review.");
+  } else {
+    await gh("api", "--method", "POST", `repos/{owner}/{repo}/pulls/${number}/comments/${t.id}/replies`, "-f", `body=${body}`);
+    host.status(`Replied to ${t.user}.`);
+  }
+  await threadsChanged(number);
 }
 
 /** Resolved threads you opened with Show, by thread ID. */
@@ -1452,7 +1599,7 @@ function drawZones() {
     else {
       const actions = el("div", "pr-thread-actions");
       action(actions, "Reply", () => ((form = { side: t.side, line: t.line!, start: t.line!, reply: t }), drawZones()));
-      if (t.node) action(actions, t.resolved ? "Unresolve" : "Resolve", () => setResolved(t, !t.resolved));
+      if (t.node) action(actions, t.resolved ? "Unresolve" : "Resolve", () => setResolved(pr.number, t, !t.resolved));
       if (t.resolved) action(actions, "Hide", () => (expanded.delete(t.id), drawZones()));
       if (threads.some((x) => x.id !== t.id && x.line && !x.resolved)) action(actions, "Next Unresolved", () => nextUnresolved(pr, threads, t));
       thread.append(actions);
@@ -1493,15 +1640,13 @@ function commentForm() {
   };
   // With a pending review, GitHub takes no comment outside it, so a reply joins the review, as on GitHub.
   const inReview = pending?.number === pr.number;
-  if (f.reply && inReview && f.reply.node) {
-    const thread = f.reply.node;
-    button("Add Reply to Review", async (body) => {
-      await gh("api", "graphql", "-f", "query=mutation($review: ID!, $thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewId: $review, pullRequestReviewThreadId: $thread, body: $body }) { comment { id } } }", "-f", `review=${pending!.node}`, "-f", `thread=${thread}`, "-f", `body=${body}`).then(
-        async () => (host.status("Added the reply to your pending review."), (form = undefined), await loadPending(pr.number), drawZones()),
-        (e) => showError(`Can't add the reply`, e),
-      );
+  if (f.reply) {
+    const thread = f.reply;
+    button(inReview && thread.node ? "Add Reply to Review" : "Reply", (body) => {
+      form = undefined;
+      return replyTo(pr.number, thread, body).catch((e) => showError(`Can't reply`, e));
     }, true);
-  } else if (f.reply) button("Reply", (body) => post([`repos/{owner}/{repo}/pulls/${pr.number}/comments/${f.reply!.id}/replies`, "-f", `body=${body}`]), true);
+  }
   else {
     button("Add to Review", async (body) => {
       buttons.querySelectorAll("button").forEach((b) => (b.disabled = true));
@@ -1547,8 +1692,7 @@ function commentForm() {
     if (posted === undefined) return buttons.querySelectorAll("button").forEach((b) => (b.disabled = false));
     host.status(`Commented on ${path}:${f.line}`);
     form = undefined;
-    shown!.threads = await lineComments(pr.number).catch((e) => (showError("Can't reload the comments", e), shown!.threads));
-    drawZones();
+    await threadsChanged(pr.number);
   };
   box.append(text, buttons);
   requestAnimationFrame(() => text.focus());

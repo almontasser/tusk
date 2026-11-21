@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { actionsJob, cleanLog, sortChecks, suggestion, askpassKind, age, alignmentGaps, graphRows, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseRefs, parseStashList, resolveSimple, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
+import { actionsJob, checkDuration, cleanLog, sortChecks, suggestion, askpassKind, age, alignmentGaps, graphRows, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseRefs, parseStashList, resolveSimple, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -309,4 +309,13 @@ test("reads suggestion blocks", () => {
   assert.equal(suggestion("Try this:\n```suggestion\n  return 1;\n  // ok\n```\nthanks"), "  return 1;\n  // ok");
   assert.equal(suggestion("```suggestion\n```"), "");
   assert.equal(suggestion("```php\nx\n```"), null);
+});
+
+test("formats check durations", () => {
+  const at = (s: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, s)).toISOString();
+  assert.equal(checkDuration({ startedAt: at(0), completedAt: at(45) }), "45s");
+  assert.equal(checkDuration({ startedAt: at(0), completedAt: at(125) }), "2m 5s");
+  assert.equal(checkDuration({ startedAt: at(0), completedAt: at(3720) }), "1h 2m");
+  assert.equal(checkDuration({ startedAt: at(0), completedAt: "0001-01-01T00:00:00Z" }, Date.parse(at(10))), "10s");
+  assert.equal(checkDuration({}), "");
 });

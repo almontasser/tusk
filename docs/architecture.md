@@ -3940,6 +3940,18 @@ the branch has no upstream or is ahead of it, since `gh pr create` would ask in
 a terminal, then runs `gh pr create` with `--base`, `--head`, `--title`,
 `--body`, and `--draft`.
 
+`replyTo` and `setResolved` serve both the diff and the tab, and
+`threadsChanged` redraws the threads wherever the pull request shows them. A
+reply joins your pending review while you have one, as on GitHub.
+
+Checks group by `workflowName` from `statusCheckRollup`; commit statuses, which
+have none, form their own group. `checkDuration` in `gitparse.ts` reads
+`startedAt` and `completedAt`, treating GitHub's `0001-01-01` as not finished.
+
+The list's new-activity mark compares each row's `updatedAt` with the one you
+last saw, which the tab saves in `localStorage` (`pr-seen:<project>`) whenever
+it draws. It's a per-computer convenience; losing it loses only the marks.
+
 #### Fields, checks, and the status box
 
 There are three field lists: `FIELDS` for the status bar's lookup, `LIST_FIELDS`
