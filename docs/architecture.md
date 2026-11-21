@@ -4352,6 +4352,56 @@ file list's type-ahead takes V while the list has focus. The tab's element outli
 its redraws, so `nextUnviewedKey` adds one listener per element and keeps the
 latest Files tab's function in a `WeakMap`.
 
+#### Conversation
+
+The Conversation tab comes from GraphQL's `timelineItems`, which, unlike
+`gh pr view --json comments,reviews`, has the events and, per comment, its
+`reactionGroups`, `viewerCanReact`, and the `Minimizable` fields (`isMinimized`,
+`minimizedReason`, `viewerCanMinimize`, `viewerCanUnminimize`).
+`loadConversation` in `prconversation.ts` fetches it with `--paginate` beside
+`gh pr view`, with only the item types in `TIMELINE_TYPES`. When it fails, such
+as on an older GitHub Enterprise, the tab falls back to gh's comments and
+reviews without events. Line threads still come from REST (`lineComments`); its
+`THREADS` query now also brings each thread comment's reactions and moderation
+fields, by `databaseId`, onto `ReviewComment.subject`.
+
+`prconversationdata.ts` holds the logic with no DOM, which
+`prconversationdata.test.ts` tests. It imports nothing, so it sits above
+`prshared.ts`, which imports `emojify` and the `Subject` type from it.
+`prconversation.ts` sits between `prthreads.ts` and `prpage.ts`. `entries` keeps the API's order (commits
+have no date in the timeline and their commit dates can be months old, so a
+run of commits takes the date before it), groups runs of commits, and drops the
+`ClosedEvent` that has a `MergedEvent`'s time. `mergeByDate` sorts line threads
+in by date. `eventLine` turns an event into the parts of its line. Also there:
+`quote`, `emojiText` and `emojify`, `toggleReaction`, `canDismiss`, and
+`folded`.
+
+`conversationSection` in `prpage.ts` collects a draw function per item, not
+nodes, and `foldItems` draws the first and last ones; the folded middle draws
+only when you click **Show more**, so its Markdown never renders before then.
+How much you revealed is kept per pull request, so a refresh keeps it.
+`decorate` adds Quote, Hide or Unhide, Dismiss, the reactions bar, and the
+hidden fold to the `[meta, body]` that `commentBlock` returns, so
+`commentBlock` and the diff's threads don't change. Reactions, hiding, and
+dismissing are GraphQL mutations by node ID (`addReaction`, `removeReaction`,
+`minimizeComment`, `unminimizeComment`, `dismissPullRequestReview`). A reaction
+redraws only its bar, and puts it back if GitHub refuses. Reviews have no
+`viewerCanDismiss`, so Dismiss shows for `APPROVED` and `CHANGES_REQUESTED`
+reviews when `viewerPermission` is `ADMIN`, `MAINTAIN`, or `WRITE`.
+
+`markdown` replaces `:name:` in text nodes after sanitizing, outside code and
+links, with DOM nodes. Like GitHub (checked with `gh api markdown`), a known
+name needs no space around it, and an unknown name's closing colon can open the
+next name. `gh api emojis` maps names to image URLs whose file
+names hold the code points. A single code point, a keycap, or a flag becomes
+text; other sequences lose their joiners in the file name, so they stay images,
+as do GitHub's own emoji such as `:octocat:`. `loadMarkdown` loads the list,
+kept in `localStorage` for a week and refreshed in the background.
+
+Saved replies are a `Record<string, string>` setting (`prSavedReplies`) in
+settings.json, so they're per user, not per project. The **Saved replies**
+settings section edits them.
+
 ## Filament intelligence (milestone 6)
 
 Tusk's server completes Filament's fluent methods, such as
