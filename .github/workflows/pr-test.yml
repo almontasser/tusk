@@ -1,0 +1,7 @@
+name: PR panel test
+on: pull_request
+jobs:
+  slow:
+    runs-on: ubuntu-latest
+    steps:
+      - run: sleep 75 && echo done
