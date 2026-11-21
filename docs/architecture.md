@@ -10326,3 +10326,13 @@ user code:
   `gh --paginate` follows only one list's `pageInfo`.
 - Committing applied suggestions saves through the host, then runs
   `git commit -- <files>`, so other staged changes stay out. It never pushes.
+
+### 2026-11-21: Check extras from one GraphQL query
+
+- Required flags, annotations, and deployments come from one GraphQL query on
+  the pull request's last commit, cached by pull request and check states:
+  one request instead of one REST call per check, and the 15-second refresh
+  reuses it. Check runs are matched by name and details URL, because two
+  workflows can have jobs with the same name.
+- GitHub has no log for a running job, so a running job shows its steps from
+  the REST job endpoint instead.
