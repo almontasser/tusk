@@ -682,7 +682,8 @@ export function cleanLog(log: string): string {
       if (line) out.push(line);
       continue;
     }
-    if (parts[1] !== step) (step = parts[1]), out.push(`${out.length ? "\n" : ""}── ${step} ──`);
+    // gh names a step it can't match to the job's steps UNKNOWN STEP, and then prints the whole job.
+    if (parts[1] !== step) (step = parts[1]), step !== "UNKNOWN STEP" && out.push(`${out.length ? "\n" : ""}── ${step} ──`);
     out.push(parts.slice(2).join("\t").replace(/^﻿?\d{4}-\d\d-\d\dT[\d:.]+Z ?/, "").replace(/\x1b\[[\d;]*m/g, ""));
   }
   return out.join("\n");

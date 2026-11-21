@@ -290,9 +290,11 @@ and merging, with a button that deals with it:
 ### Checks
 
 Checks list failed ones first, and the heading counts them by state. While
+some checks fail or run, passed and skipped ones fold into a **Show** link. While
 checks run, the list reloads every 15 seconds on its own. Click a check to
 open its page in your browser. A failed GitHub Actions job has a **Log** link
-that shows the log of its failed steps in the editor, without the timestamps.
+that shows the log of its failed steps in the editor, without the timestamps,
+scrolled to the first error, such as PHPUnit's `There were 2 failures`.
 File paths in the log that exist in the project, such as
 `tests/Feature/OrderTest.php:42`, are links: click one to open the file at that
 line. **Re-run Failed** in the heading runs the failed jobs again.
@@ -357,6 +359,7 @@ and asks you to confirm before it merges on GitHub. The confirmation also
 offers to delete the branch after merging, and, while checks or reviews are
 still missing, **Merge When Ready**, which turns on GitHub's auto-merge.
 
+The **Refresh** button in the tab's header reloads the pull request on screen.
 **More…** edits the title, requests a review, adds or removes labels, converts
 the pull request to a draft or marks it ready, updates the branch, closes or
 reopens it, and copies its link or branch name.

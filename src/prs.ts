@@ -258,10 +258,6 @@ export async function showPullRequest(number: number) {
   action("Check Out", checkOut);
   action("Open in Browser", () => openUrl(pr.url));
   action("More…", () => more(pr, run));
-  const refresh = el("button", "icon-button codicon codicon-refresh");
-  refresh.title = "Refresh";
-  refresh.onclick = reload;
-  actions.append(refresh);
 
   // What stands between the pull request and merging, with the button that deals with it.
   const banner = el("div", "pr-banner");
@@ -512,11 +508,17 @@ function reviewerRow(pr: Details) {
   return row;
 }
 
+/** Pull requests whose passed and skipped checks you opened, which are folded while others failed or run. */
+const unfolded = new Set<number>();
+
 /** Draws the checks, failed first, with a log link on failed GitHub Actions jobs and Re-run Failed in the heading. */
 function drawChecks(pr: Details, list: HTMLElement, heading: HTMLElement) {
-  const all = sortChecks(pr.statusCheckRollup ?? []);
+  const sorted = sortChecks(pr.statusCheckRollup ?? []);
+  const done = sorted.filter((c) => ["passed", "skipped"].includes(checkState(c)));
+  const fold = done.length > 3 && done.length < sorted.length && !unfolded.has(pr.number);
+  const all = fold ? sorted.filter((c) => !done.includes(c)) : sorted;
   const counts = { failed: 0, pending: 0, passed: 0, skipped: 0 };
-  all.forEach((c) => counts[checkState(c)]++);
+  sorted.forEach((c) => counts[checkState(c)]++);
   const parts = [counts.failed && `${counts.failed} failed`, counts.pending && `${counts.pending} running`, counts.passed && `${counts.passed} passed`, counts.skipped && `${counts.skipped} skipped`].filter(Boolean);
   heading.replaceChildren(`Checks${parts.length ? ` · ${parts.join(" · ")}` : " (none)"}`);
   const failedRuns = [...new Set(all.filter((c) => checkState(c) === "failed").map((c) => actionsJob(c.detailsUrl)?.run).filter((r): r is string => !!r))];
@@ -537,6 +539,7 @@ function drawChecks(pr: Details, list: HTMLElement, heading: HTMLElement) {
       const li = el("li");
       li.role = "option";
       li.dataset.key = c.name ?? c.context ?? "";
+      li.title = c.name ?? c.context ?? "";
       li.append(el("span", `checks-${state}`, icons[state]), el("span", "name-plain", ` ${c.name ?? c.context}`));
       const url = c.detailsUrl ?? c.targetUrl;
       if (url) li.onclick = () => openUrl(url);
@@ -550,6 +553,13 @@ function drawChecks(pr: Details, list: HTMLElement, heading: HTMLElement) {
       return li;
     }),
   );
+  if (fold) {
+    const li = el("li");
+    const show = el("button", "link", `Show ${done.length} passed and skipped`);
+    show.onclick = () => (unfolded.add(pr.number), drawChecks(pr, list, heading));
+    li.append(show);
+    list.append(li);
+  }
 }
 
 /** While checks run, reloads them every 15 seconds, redrawing only the checks, until the page shows something else. */
@@ -575,10 +585,28 @@ function watchChecks(pr: Details, list: HTMLElement, heading: HTMLElement) {
 async function showLog(name: string, job: string) {
   const out = await withProgress(`Loading the log of ${name}…`, () => gh("run", "view", "--job", job, "--log-failed"), { error: `Can't load the log of ${name}` });
   if (out === undefined) return;
-  const text = cleanLog(out) || "The log has no failed steps.";
+  const text = cleanLog(out) || "The log has no failed steps. A canceled job, or one that timed out, has none.";
   showOutput(`${name}: failed steps`, text);
   const pre = document.querySelector<HTMLElement>("#output-dialog .output-text");
-  if (pre) linkPaths(pre, text);
+  if (!pre) return;
+  // Opens at the first error: PHPUnit's and Pest's summary, or a step's error annotation, or else the end.
+  const scroll = () => {
+    const at = text.search(/^.*(?:There (?:was|were) \d+ (?:failure|error)|FAILED|##\[error\]|Error: )/m);
+    const walker = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
+    let offset = 0;
+    while (at >= 0 && walker.nextNode()) {
+      const node = walker.currentNode as Text;
+      if (offset + node.length > at) {
+        const range = document.createRange();
+        range.setStart(node, at - offset);
+        return (pre.scrollTop += range.getBoundingClientRect().top - pre.getBoundingClientRect().top - 8);
+      }
+      offset += node.length;
+    }
+    pre.scrollTop = pre.scrollHeight;
+  };
+  scroll();
+  linkPaths(pre, text).then(scroll);
 }
 
 /**
@@ -1251,6 +1279,7 @@ export function initPullRequests(h: Host) {
   });
   // Enter or a click opens a pull request.
   listNav($("pr-list"));
-  $("pr-refresh").onclick = loadPullRequests;
+  // On a pull request's page, Refresh reloads that pull request.
+  $("pr-refresh").onclick = () => ($("pr-detail").hidden ? loadPullRequests() : showPullRequest(Number($("pr-detail").dataset.number)));
   $("pr-create").onclick = createPullRequest;
 }

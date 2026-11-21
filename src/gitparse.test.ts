@@ -301,6 +301,7 @@ test("orders checks failed first and finds Actions jobs", () => {
 test("cleans failed step logs", () => {
   const log = "test\tRun tests\t2026-01-02T03:04:05.1234567Z \x1b[31mFAIL\x1b[0m x\ntest\tRun tests\t2026-01-02T03:04:06Z done\ntest\tLint\t2026-01-02T03:04:07Z bad";
   assert.equal(cleanLog(log), "── Run tests ──\nFAIL x\ndone\n\n── Lint ──\nbad");
+  assert.equal(cleanLog("job\tUNKNOWN STEP\t2026-01-02T03:04:05Z a\njob\tUNKNOWN STEP\t2026-01-02T03:04:05Z b"), "a\nb");
 });
 
 test("reads suggestion blocks", () => {
