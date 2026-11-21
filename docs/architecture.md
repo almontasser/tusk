@@ -10278,3 +10278,20 @@ user code:
 - The admin bypass needs `viewerCanMergeAsAdmin`, `ADMIN` permission, and a
   blocked merge or a merge queue, because GitHub reports
   `viewerCanMergeAsAdmin` true for people who can only read.
+
+### 2026-11-21: Commenting in a pull request's diff
+
+- Commentable lines come from GitHub's `patch` in `pulls/N/files`, not
+  `git diff -U3`, because GitHub joins hunks a line apart that git keeps
+  separate (laravel/framework#62524). Git's diff is the fallback when the patch
+  is missing.
+- A file comment with no pending review starts the review through GraphQL
+  `addPullRequestReview` with no event, since REST's review creation takes no
+  file comments, then adds the comment with `addPullRequestReviewThread`
+  (`subjectType: FILE`).
+- View zones re-measure with a `ResizeObserver` and `layoutZone` instead of
+  being removed and re-added, so typing and focus survive.
+- Pending comments and their sides are two paginated GraphQL queries, because
+  `gh --paginate` follows only one list's `pageInfo`.
+- Committing applied suggestions saves through the host, then runs
+  `git commit -- <files>`, so other staged changes stay out. It never pushes.
