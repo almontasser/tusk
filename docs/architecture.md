@@ -10398,3 +10398,13 @@ user code:
   workflows can have jobs with the same name.
 - GitHub has no log for a running job, so a running job shows its steps from
   the REST job endpoint instead.
+
+### 2026-11-21: Since your review replays the base onto the reviewed commit
+
+- **Since your review** uses `git merge-tree` to replay the base's changes onto
+  the reviewed commit, and diffs that tree to the head. Comparing the two
+  patches, or `git range-diff`, would compare patches, which a two-sided diff
+  can't show. A file that conflicts in the replay falls back to the reviewed
+  commit.
+- Image diffs read blobs through `git cat-file blob | base64`, since
+  `run_capture` decodes output as text, so no new Rust command was needed.
