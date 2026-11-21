@@ -326,8 +326,9 @@ the status bar says whether they passed, and if you're in another tab, a
 message with **Open #123** tells you too.
 
 Checks that the base branch requires for merging say **Required** and come
-first in their state. A failing check that isn't required reads dimmer, since
-it doesn't block the merge, and the bar counts how many failures are required.
+first in their state. When the base branch requires checks, a failing check
+that isn't required reads dimmer, since it doesn't block the merge, and the bar
+counts how many failures are required.
 
 Click a check to open its log, if it failed in GitHub Actions, or else its page
 in your browser. The log button on a failed job shows the log of its failed
@@ -371,7 +372,7 @@ every 5 seconds. If the job fails, the log of its failed steps replaces them.
   folder, and it downloads into a folder named for it, which then opens in
   your file manager.
 
-Each of these, except **Re-run Failed** and **Artifacts…**, asks you to confirm
+Each of these, except **Artifacts…**, asks you to confirm
 first.
 
 #### Deployments

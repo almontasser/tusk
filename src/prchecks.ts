@@ -68,7 +68,7 @@ function details(number: number, checks: Check[] | null): { data?: CiDetails; pr
 /** Annotations about a workflow as a whole, such as "Process completed with exit code 1", are on `.github`. */
 const onFile = (a: Annotation) => a.path !== ".github";
 
-/** Project files found for CI paths, per project; a lookup that found nothing is cached as "". */
+/** Project files found for CI paths, per project. */
 const resolved = new Map<string, Promise<string>>();
 /** The project file a CI path points at, trying each of its tails (see pathTails), or "" when none is in the project. */
 function resolvePath(path: string): Promise<string> {
@@ -79,6 +79,8 @@ function resolvePath(path: string): Promise<string> {
       key,
       (async () => {
         for (const tail of pathTails(path)) if (await invoke<boolean>("path_exists", { path: `${root}/${tail}` }).catch(() => false)) return `${root}/${tail}`;
+        // A miss isn't kept: the file can appear when you check out the pull request's branch.
+        resolved.delete(key);
         return "";
       })(),
     );
@@ -129,8 +131,9 @@ export async function branchAnnotations(pr?: PullRequest) {
   let files = new Map<string, Placed[]>();
   if (pr) {
     const data = await details(pr.number, pr.statusCheckRollup).promise.catch(() => undefined);
-    if (!data || host.root() !== root || gitStatus()?.branch !== pr.headRefName) return;
-    for (const a of placed(data, pr.statusCheckRollup)) {
+    if (host.root() !== root || gitStatus()?.branch !== pr.headRefName) return;
+    // A failed lookup clears the last branch's markers too.
+    for (const a of data ? placed(data, pr.statusCheckRollup) : []) {
       const file = await resolvePath(a.path);
       if (file) files.set(file, [...(files.get(file) ?? []), a]);
     }
@@ -172,11 +175,13 @@ export function drawChecks(pr: Details, list: HTMLElement, bar: HTMLElement) {
   const counts = { failed: 0, pending: 0, passed: 0, skipped: 0 };
   sorted.forEach((c) => counts[checkState(c)]++);
   const requiredFailed = sorted.filter((c) => c.isRequired && checkState(c) === "failed").length;
+  // Without required checks, or before the lookup, nothing tells a blocking failure from one that isn't.
+  const anyRequired = sorted.some((c) => c.isRequired);
   bar.replaceChildren();
   for (const [state, label] of [["failed", "failed"], ["pending", "running"], ["passed", "passed"], ["skipped", "skipped"]] as const)
     if (counts[state]) {
       const part = el("span", "pr-check-count");
-      part.append(checkIcon(state), ` ${counts[state]} ${label}${state === "failed" && lookup.data ? ` (${requiredFailed} required)` : ""}`);
+      part.append(checkIcon(state), ` ${counts[state]} ${label}${state === "failed" && anyRequired ? ` (${requiredFailed} required)` : ""}`);
       bar.append(part);
     }
   if (!sorted.length) bar.append(el("span", "muted", "No checks"));
@@ -190,8 +195,9 @@ export function drawChecks(pr: Details, list: HTMLElement, bar: HTMLElement) {
     li.dataset.key = checkKey(c);
     li.dataset.label = name;
     // A failing check that isn't required doesn't block merging, so it reads quieter than one that does.
-    if (lookup.data && !c.isRequired && state === "failed") li.classList.add("optional");
-    li.title = lookup.data ? `${name} (${c.isRequired ? "required for merging" : "not required for merging"})` : name;
+    const known = anyRequired && extra(c) !== undefined;
+    if (known && !c.isRequired && state === "failed") li.classList.add("optional");
+    li.title = known ? `${name} (${c.isRequired ? "required for merging" : "not required for merging"})` : name;
     li.append(checkIcon(state), el("span", "pr-row-main", name));
     if (c.isRequired) li.append(el("span", "pr-check-required", "Required"));
     const took = checkDuration(c);
@@ -325,6 +331,7 @@ function runControls(pr: Details, checks: Check[], bar: HTMLElement) {
     const rerun = el("button", "", "Re-run Failed");
     rerun.title = "Run the failed GitHub Actions jobs again";
     rerun.onclick = async () => {
+      if (!(await confirm(`Re-run the failed jobs of #${pr.number}?`, "Re-run Failed"))) return;
       rerun.disabled = true;
       for (const id of failedRuns) if ((await withProgress(`Re-running the failed jobs…`, () => gh("run", "rerun", id, "--failed"), { error: "Can't re-run the failed jobs" })) === undefined) return;
       host.status(`Re-running the failed jobs of #${pr.number}.`);
@@ -337,8 +344,10 @@ function runControls(pr: Details, checks: Check[], bar: HTMLElement) {
     const cancel = el("button", "", running.length > 1 ? "Cancel Run…" : "Cancel Run");
     cancel.title = "Cancel a running GitHub Actions workflow run";
     cancel.onclick = async () => {
-      const name = running.length > 1 ? await choose("Cancel which run?", running.map(([, r]) => r.workflow)) : running[0][1].workflow;
-      const run = running.find(([, r]) => r.workflow === name)?.[0];
+      // Two runs of one workflow, such as on push and on pull_request, are told apart by their IDs.
+      const labels = running.map(([id, r]) => (running.filter(([, o]) => o.workflow === r.workflow).length > 1 ? `${r.workflow} (run ${id})` : r.workflow));
+      const name = running.length > 1 ? await choose("Cancel which run?", labels) : labels[0];
+      const run = running[labels.indexOf(name ?? "")]?.[0];
       if (!run || !(await confirm(`Cancel the ${name} run of #${pr.number}?`, "Cancel Run"))) return;
       if ((await withProgress(`Canceling ${name}…`, () => gh("run", "cancel", run), { error: `Can't cancel ${name}` })) === undefined) return;
       host.status(`Canceled the ${name} run of #${pr.number}.`);
@@ -354,8 +363,10 @@ function runControls(pr: Details, checks: Check[], bar: HTMLElement) {
   }
   // A first-time contributor's workflow runs wait for approval; GitHub marks them action_required.
   const key = `${pr.number}:${pr.headRefOid}`;
-  if (!awaiting.has(key)) awaiting.set(key, gh("run", "list", "--commit", pr.headRefOid, "--status", "action_required", "--json", "databaseId,workflowName").then(JSON.parse).catch(() => (awaiting.delete(key), [])));
+  if (!awaiting.has(key)) awaiting.set(key, gh("run", "list", "--commit", pr.headRefOid, "--status", "action_required", "--json", "databaseId,workflowName").then(JSON.parse).catch(() => []));
   awaiting.get(key)!.then((waiting) => {
+    // No runs waiting isn't kept, so runs that start waiting later show at the next redraw.
+    if (!waiting.length) awaiting.delete(key);
     if (!waiting.length || !bar.isConnected || bar.querySelector(".pr-approve")) return;
     const approve = el("button", "pr-approve", `Approve ${waiting.length} ${waiting.length === 1 ? "Run" : "Runs"}`);
     approve.title = `Approve and start the workflow runs waiting for a maintainer: ${waiting.map((w) => w.workflowName).join(", ")}`;
