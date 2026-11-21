@@ -649,7 +649,7 @@ async function renderPullRequest(number: number) {
     }
     reply(hasPending ? `Submit Review (${pendingComments.length})` : "Comment", "COMMENT", true, hasPending ? `Submitted your review on #${number}` : `Commented on #${number}`, true);
     // ⌘⏎ does the main action, as in the diff's comment box.
-    text.onkeydown = (e) => e.key === "Enter" && mod(e) && buttons.querySelector<HTMLButtonElement>("button.primary")!.click();
+    text.onkeydown = (e) => void (e.key === "Enter" && mod(e) && buttons.querySelector<HTMLButtonElement>("button.primary")!.click());
     const hint = el("span", "muted pr-hint", `${isMac ? "⌘" : "Ctrl+"}⏎ to ${hasPending ? "submit" : "comment"}`);
     buttons.prepend(hint);
     box.append(writer(text, repo), buttons);
@@ -817,7 +817,7 @@ async function renderPullRequest(number: number) {
       filter.ariaLabel = "Filter files";
       filter.className = "pr-file-filter";
       filter.oninput = () => draw(filter.value);
-      filter.onkeydown = (e) => e.key === "ArrowDown" && (e.preventDefault(), files.focus());
+      filter.onkeydown = (e) => void (e.key === "ArrowDown" && (e.preventDefault(), files.focus()));
       bar.prepend(filter);
     }
     return [bar, files];
@@ -2298,7 +2298,7 @@ export async function createPullRequest() {
       create.disabled = false;
     }
   };
-  body.onkeydown = title.onkeydown = (e) => e.key === "Enter" && mod(e) && form.requestSubmit();
+  body.onkeydown = title.onkeydown = (e) => void (e.key === "Enter" && mod(e) && form.requestSubmit());
   form.append(heading, sub, title, body, buttons, commitsHeading, commits);
   page.replaceChildren(form);
   await fill();
