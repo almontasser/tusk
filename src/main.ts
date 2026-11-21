@@ -2461,7 +2461,27 @@ $("todo-refresh").onclick = () => loadTodos();
 // The sidebar and panel sizes, where the panel sits, and maximizing it.
 initLayout({ focusEditor: () => editor.focus(), status });
 initGit({ root: () => root, openFile, status, showView, openFolder });
-initPullRequests({ root: () => root, status, showView });
+initPullRequests({
+  root: () => root,
+  status,
+  showView,
+  openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }),
+  async replaceLines(path, start, end, expected, text) {
+    if (!(await openFile(path))) return false;
+    const model = editor.getModel()!;
+    if (end > model.getLineCount()) return false;
+    const range = new monaco.Range(start, 1, end, model.getLineMaxColumn(end));
+    if (model.getValueInRange(range) !== expected) return false;
+    // An empty suggestion deletes the lines, with their line break.
+    const target = text || end === model.getLineCount() ? range : new monaco.Range(start, 1, end + 1, 1);
+    editor.pushUndoStop();
+    editor.executeEdits("suggestion", [{ range: target, text }]);
+    editor.pushUndoStop();
+    editor.setSelection(new monaco.Range(start, 1, start, 1));
+    editor.revealLineInCenter(start);
+    return true;
+  },
+});
 initDatabase({ root: () => root, openFile, status });
 initDeployment({
   root: () => root,

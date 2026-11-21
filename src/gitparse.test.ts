@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { askpassKind, age, alignmentGaps, graphRows, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseRefs, parseStashList, resolveSimple, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
+import { actionsJob, cleanLog, sortChecks, suggestion, askpassKind, age, alignmentGaps, graphRows, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseRefs, parseStashList, resolveSimple, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -289,4 +289,22 @@ test("asks git's and ssh's prompts by kind", () => {
   assert.equal(askpassKind("Enter passphrase for key '/Users/me/.ssh/id_ed25519': ", false), "secret");
   assert.equal(askpassKind("Are you sure you want to continue connecting (yes/no/[fingerprint])? ", false), "yesno");
   assert.equal(askpassKind("Allow use of key?", true), "confirm");
+});
+
+test("orders checks failed first and finds Actions jobs", () => {
+  const checks = [{ name: "b", conclusion: "SUCCESS", status: "COMPLETED" }, { name: "c", status: "IN_PROGRESS" }, { name: "a", conclusion: "FAILURE", status: "COMPLETED" }];
+  assert.deepEqual(sortChecks(checks).map((c) => c.name), ["a", "c", "b"]);
+  assert.deepEqual(actionsJob("https://github.com/o/r/actions/runs/12/job/34"), { run: "12", job: "34" });
+  assert.equal(actionsJob("https://ci.example.com/build/1"), null);
+});
+
+test("cleans failed step logs", () => {
+  const log = "test\tRun tests\t2026-01-02T03:04:05.1234567Z \x1b[31mFAIL\x1b[0m x\ntest\tRun tests\t2026-01-02T03:04:06Z done\ntest\tLint\t2026-01-02T03:04:07Z bad";
+  assert.equal(cleanLog(log), "── Run tests ──\nFAIL x\ndone\n\n── Lint ──\nbad");
+});
+
+test("reads suggestion blocks", () => {
+  assert.equal(suggestion("Try this:\n```suggestion\n  return 1;\n  // ok\n```\nthanks"), "  return 1;\n  // ok");
+  assert.equal(suggestion("```suggestion\n```"), "");
+  assert.equal(suggestion("```php\nx\n```"), null);
 });

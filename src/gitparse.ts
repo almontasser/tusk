@@ -654,3 +654,42 @@ export function askpassKind(prompt: string, confirm: boolean): "confirm" | "yesn
   if (/\(yes\/no/i.test(prompt)) return "yesno";
   return /^\s*username/i.test(prompt) ? "text" : "secret";
 }
+
+const checkOrder: Record<CheckState, number> = { failed: 0, pending: 1, passed: 2, skipped: 3 };
+
+/** Checks with failures first, then running ones, then passed and skipped, each group by name. */
+export function sortChecks(checks: Check[]): Check[] {
+  const name = (c: Check) => c.name ?? c.context ?? "";
+  return [...checks].sort((a, b) => checkOrder[checkState(a)] - checkOrder[checkState(b)] || name(a).localeCompare(name(b)));
+}
+
+/** The GitHub Actions run and job of a check, from its details URL, or null for other checks. */
+export function actionsJob(url: string | undefined): { run: string; job: string } | null {
+  const m = url?.match(/\/actions\/runs\/(\d+)\/job\/(\d+)/);
+  return m ? { run: m[1], job: m[2] } : null;
+}
+
+/**
+ * Makes `gh run view --log-failed` readable: each line starts with the job, the step, and a timestamp, split by
+ * tabs. Keeps the step once, as a heading, and the text, without the timestamp or escape codes.
+ */
+export function cleanLog(log: string): string {
+  let step = "";
+  const out: string[] = [];
+  for (const line of log.split("\n")) {
+    const parts = line.split("\t");
+    if (parts.length < 3) {
+      if (line) out.push(line);
+      continue;
+    }
+    if (parts[1] !== step) (step = parts[1]), out.push(`${out.length ? "\n" : ""}── ${step} ──`);
+    out.push(parts.slice(2).join("\t").replace(/^﻿?\d{4}-\d\d-\d\dT[\d:.]+Z ?/, "").replace(/\x1b\[[\d;]*m/g, ""));
+  }
+  return out.join("\n");
+}
+
+/** The text of the first ```suggestion block in a review comment, or null without one. An empty block deletes the lines. */
+export function suggestion(body: string): string | null {
+  const m = body.match(/^ {0,3}(`{3,}|~{3,})suggestion[^\S\n]*\n([\s\S]*?)^ {0,3}\1[^\S\n]*$/m);
+  return m ? m[2].replace(/\r?\n$/, "") : null;
+}

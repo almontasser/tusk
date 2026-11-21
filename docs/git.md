@@ -264,25 +264,65 @@ the ones that talk to a remote.
 ## Pull requests
 
 The **Pull Requests** tab lists the repository's pull requests through the
-GitHub CLI. Filter by open pull requests, ones you created, or ones waiting for
-your review, and type in the search box to search them with GitHub's search
-syntax, such as `fix label:bug`. Each row shows check status (✓ passed, ✗
-failed, ● running) and the review decision. The list shows 50 at a time;
-**Load More** at the end shows 50 more. If the GitHub CLI isn't installed, or
+GitHub CLI. Filter by open pull requests, ones you created, ones waiting for
+your review, or closed, merged, or all pull requests, and type in the search
+box to search them with GitHub's search syntax, such as `fix label:bug`. Each
+row shows check status (✓ passed, ✗ failed, ● running), the review decision,
+the lines added and removed, when it last changed, and its labels. The list
+shows 50 at a time; **Load More** at the end shows 50 more. If the GitHub CLI isn't installed, or
 you aren't logged in, the tab says so and offers to fix it.
 
-Click a pull request to see its checks, changed files, description, reviews,
-and comments. Descriptions and comments render as GitHub Markdown, and their
-links open in your browser. `#123` links to that issue or pull request, and
-`@name` to that person's profile. Click a changed file to see its diff without
-checking out the branch. A 💬 count marks files with line comments.
+Click a pull request to see its checks, changed files, commits, description,
+reviews, and comments. Under the title, you see its labels and its reviewers:
+✓ approved, ✗ changes requested, and ● still asked to review.
+
+A status box under the buttons tells you what stands between the pull request
+and merging, with a button that deals with it:
+
+- **Draft**: click **Ready for Review**.
+- **Conflicts** with the base branch: click **Check Out** and merge the base
+  into it.
+- **Behind** the base branch: click **Update Branch** to merge the base into
+  it, or rebase onto it, on GitHub.
+- **Blocked** by a missing approval, requested changes, or a required check.
+- **Auto-merge is on**: click **Turn Off** to stop it.
+
+### Checks
+
+Checks list failed ones first, and the heading counts them by state. While
+checks run, the list reloads every 15 seconds on its own. Click a check to
+open its page in your browser. A failed GitHub Actions job has a **Log** link
+that shows the log of its failed steps in the editor, without the timestamps.
+File paths in the log that exist in the project, such as
+`tests/Feature/OrderTest.php:42`, are links: click one to open the file at that
+line. **Re-run Failed** in the heading runs the failed jobs again.
+
+### Files and commits
+
+Click a changed file to see its diff without checking out the branch. ⌥⌘← and
+⌥⌘→, or the arrows in the diff's header, move to the previous or next file of
+the pull request, with its comments. A 💬 count marks files with line
+comments; it's yellow while a thread there is unresolved. Each file has
+GitHub's **Viewed** checkbox, so the files you've read are the same here and in
+the browser, and the heading counts them.
+
+Click a commit to see its own diff.
+
+### Conversation
+
+Descriptions and comments render as GitHub Markdown, and their links open in
+your browser. `#123` links to that issue or pull request, and
+`@name` to that person's profile.
 
 Line comments appear in the conversation under the file and lines they're on.
 Click one to open the diff at that line. In the diff, each thread shows under
 its line, with **Reply** and **Resolve** links. A resolved thread shows as one
-line; click **Show** to read it or **Unresolve** to reopen it. Your own
-comments, in the diff and in the conversation, have **Edit** and **Delete**
-links. Deleting asks you to click **Delete** again to confirm.
+line; click **Show** to read it or **Unresolve** to reopen it. The
+conversation's heading counts unresolved threads; click **Go to Unresolved**
+to open the first, and **Next Unresolved** under a thread to go on to the next,
+across files. Your own comments, in the diff and in the conversation, have
+**Edit** and **Delete** links, and your own review summaries have **Edit**.
+Deleting asks you to click **Delete** again to confirm.
 
 To comment on code in the diff:
 
@@ -290,7 +330,14 @@ To comment on code in the diff:
 2. Click **Comment on Line**. A comment box opens under the line.
 3. Write the comment (Markdown, on as many lines as you like), then click
    **Add to Review** to keep it for your review, or **Comment Now** to post it
-   at once. ⌘⏎ adds it to the review, and Escape closes the box.
+   at once. ⌘⏎ adds it to the review, and Escape closes the box. On the new
+   side, **Suggest Change** puts the selected lines in a `suggestion` block
+   for you to edit, as GitHub does.
+
+A comment with a suggestion has an **Apply Suggestion Locally** link. With the
+pull request's branch checked out, it opens the file and replaces the lines in
+the editor, where you can review it, undo it, or save it. If the lines changed
+since the suggestion was made, it says so and changes nothing.
 
 **Add to Review** puts the comment in your pending review on GitHub, which only
 you can see until you submit it. It's the same review as in the browser: a
@@ -306,7 +353,13 @@ conversation, and **Request Changes** needs one.
 Click **Check Out** to switch to the branch. When the current branch has a pull
 request, its number and check status appear next to the branch name in the
 status bar. **Merge…** asks how to merge (a merge commit, squash, or rebase)
-and asks you to confirm before it merges on GitHub.
+and asks you to confirm before it merges on GitHub. The confirmation also
+offers to delete the branch after merging, and, while checks or reviews are
+still missing, **Merge When Ready**, which turns on GitHub's auto-merge.
+
+**More…** edits the title, requests a review, adds or removes labels, converts
+the pull request to a draft or marks it ready, updates the branch, closes or
+reopens it, and copies its link or branch name.
 
 Pull requests need the GitHub CLI (`gh`), signed in with `gh auth login`.
 

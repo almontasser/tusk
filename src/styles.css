@@ -771,6 +771,25 @@ button.link:hover { text-decoration: underline; }
 .pr-files .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pr-comment { border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--border-subtle); }
 .pr-body { overflow-wrap: anywhere; margin-top: 4px; -webkit-user-select: text; user-select: text; line-height: 1.5; }
+.pr-banner { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.pr-banner-line { display: flex; gap: 8px; align-items: baseline; padding: 6px 10px; border-radius: 6px; background: var(--bg); box-shadow: inset 3px 0 0 var(--faint), inset 0 0 0 1px var(--border-subtle); }
+.pr-banner-line span { flex: 1; }
+.pr-banner-line.good { box-shadow: inset 3px 0 0 var(--green), inset 0 0 0 1px var(--border-subtle); }
+.pr-banner-line.warn { box-shadow: inset 3px 0 0 var(--yellow), inset 0 0 0 1px var(--border-subtle); }
+.pr-banner-line.bad, .pr-banner-line.closed { box-shadow: inset 3px 0 0 var(--red), inset 0 0 0 1px var(--border-subtle); }
+.pr-banner-line.merged { box-shadow: inset 3px 0 0 var(--purple), inset 0 0 0 1px var(--border-subtle); }
+.pr-labels { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.pr-label { font-size: 11px; padding: 0 7px; border-radius: 9px; color: var(--text); background: color-mix(in srgb, var(--label) 22%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--label) 55%, transparent); }
+.pr-reviewers { margin-top: 4px; }
+.pr-heading-link { margin-left: 8px; text-transform: none; letter-spacing: 0; font-weight: normal; font-size: 12px; }
+.pr-files li.viewed .name { opacity: 0.55; }
+.pr-files input[type="checkbox"] { margin: 0; flex-shrink: 0; }
+.pr-files .codicon-comment.unresolved { color: var(--yellow); }
+.pr-commits .hash { font: 12px var(--mono); color: var(--faint); flex-shrink: 0; }
+.pr-checks .name-plain { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge.state-merged { color: var(--purple); }
+.badge.state-closed { color: var(--red); }
+.log-link { color: var(--accent); text-decoration: underline; cursor: pointer; }
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }
 .markdown p, .markdown ul, .markdown ol, .markdown pre, .markdown blockquote, .markdown table { margin: 0 0 8px; }

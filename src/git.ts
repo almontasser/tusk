@@ -406,7 +406,7 @@ export function showDiff(path: string, original: string, modified: string, label
 }
 
 /** A file in a diff of several, such as a commit's or a stash's, loaded when you move to it. */
-export type DiffFile = { path: string; status?: string; load(): Promise<[string, string]> };
+export type DiffFile = { path: string; status?: string; load(): Promise<[string, string]>; show?(): Promise<boolean> };
 let diffFiles: { files: DiffFile[]; index: number; label: string } | undefined;
 
 /**
@@ -416,9 +416,14 @@ let diffFiles: { files: DiffFile[]; index: number; label: string } | undefined;
 export async function showDiffs(files: DiffFile[], label: string, index = 0) {
   const f = files[index];
   if (!f) return host.status("There are no changed files to show.");
-  const texts = await withProgress(`Loading the diff of ${f.path}…`, () => f.load(), { error: `Can't show the diff of ${f.path}` });
-  if (!texts) return;
-  showDiff(f.path, texts[0], texts[1], label);
+  // A file with its own `show`, such as a pull request's with its comments, draws its diff itself.
+  if (f.show) {
+    if (!(await f.show())) return;
+  } else {
+    const texts = await withProgress(`Loading the diff of ${f.path}…`, () => f.load(), { error: `Can't show the diff of ${f.path}` });
+    if (!texts) return;
+    showDiff(f.path, texts[0], texts[1], label);
+  }
   diffFiles = { files, index, label };
   const nav = $("diff-files");
   nav.hidden = files.length < 2;

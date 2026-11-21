@@ -3831,8 +3831,9 @@ range selected, the form replies to that thread.
 #### Resolving, editing, and deleting
 
 REST has no resolved state for threads, so `lineComments` also asks GraphQL
-for `reviewThreads` (the first 100), through `gh api graphql` with `-F
-owner={owner} -F name={repo}`, which `gh` fills in from the repository. Each
+for `reviewThreads`, through `gh api graphql --paginate` with `-F
+owner={owner} -F name={repo}`, which `gh` fills in from the repository.
+`--paginate` follows `$endCursor` and `pageInfo` through every page. Each
 GraphQL thread is matched to its REST thread by the `databaseId` of its first
 comment, which is the REST comment ID. **Resolve** and **Unresolve** send
 `resolveReviewThread` or `unresolveReviewThread` with the thread's node ID. If
@@ -3842,7 +3843,11 @@ GraphQL fails, the threads still load, without resolve state or the links.
 and for your own adds **Edit** (`PATCH`) and **Delete** (`DELETE`) on its REST
 path: `pulls/comments/<id>` for line comments, and `issues/comments/<id>` for
 conversation comments, whose ID comes from the `#issuecomment-<id>` in the URL
-`gh pr view` returns. Which comment is being edited, or waits for its delete to
+`gh pr view` returns. A review's summary has no REST ID in `gh pr view`, so
+its **Edit** sends GraphQL's `updatePullRequestReview` with the review's node
+ID; GitHub can't delete a submitted review, so it has no **Delete**.
+`commentBlock` takes a `Target` (`restTarget` or `reviewTarget`) with the
+request for each. Which comment is being edited, or waits for its delete to
 be confirmed, is module state; in the diff a change redraws every zone, since
 a view zone's height is fixed when it's added, and in the sidebar it redraws
 the one comment.
@@ -3904,6 +3909,43 @@ finishes.
 The pull request for the current branch (`gh pr view` without a number) loads
 when the branch or project changes, through `branchListeners` in `git.ts`.
 It makes a network call, so it doesn't run on every refresh.
+
+#### Fields, checks, and the status box
+
+There are three field lists: `FIELDS` for the status bar's lookup, `LIST_FIELDS`
+adding the list's labels, dates, and line counts, and `DETAIL_FIELDS` adding
+what only the page needs (`mergeable`, `mergeStateStatus`, `autoMergeRequest`,
+`latestReviews`, `reviewRequests`, `commits`). The status box reads
+`mergeStateStatus`: `DIRTY` or `mergeable: CONFLICTING` is a conflict,
+`BEHIND` offers `gh pr update-branch` (with `--rebase` for a rebase), and
+`BLOCKED` is explained from `reviewDecision`. The other actions are `gh pr
+ready` (`--undo` for a draft), `gh pr close`, `gh pr reopen`, and `gh pr edit`
+with `--title`, `--add-reviewer`, `--add-label`, or `--remove-label`. Reviewers
+come from `repos/{owner}/{repo}/assignees`, the people who can be assigned.
+
+`sortChecks` in `gitparse.ts` orders checks failed first. `actionsJob` reads
+the run and job IDs from a GitHub Actions check's `detailsUrl`
+(`/actions/runs/<run>/job/<job>`), which `gh run view --job <job> --log-failed`
+and `gh run rerun <run> --failed` take. `cleanLog` drops the job column and
+timestamps and prints each step once as a heading. `linkPaths` then tries each
+path in the log from each of its folders down, with `path_exists`, so a CI path
+such as `/home/runner/work/app/app/tests/X.php` finds `tests/X.php`. While any
+check runs, `watchChecks` reloads `statusCheckRollup` every 15 seconds and
+redraws only the checks list, so it never clears a comment you're typing; it
+stops once the list leaves the page.
+
+The Viewed checkboxes are GitHub's own (`viewerViewedState` on the pull
+request's `files` in GraphQL, changed by `markFileAsViewed` and
+`unmarkFileAsViewed`), so they match the browser. A file's diff opens through
+`showDiffs` with every file of the pull request, each a `DiffFile` whose `show`
+draws the diff with its threads (`showOneDiff`), so the diff's previous and
+next buttons move through the pull request's files.
+
+`suggestion` in `gitparse.ts` reads a comment's `suggestion` block.
+`applySuggestion` compares the thread's lines in the pull request's head
+version with the lines in your file, through the host's `replaceLines`, and
+replaces them in the editor as one undoable edit only when they match and the
+pull request's branch is checked out.
 
 ## Filament intelligence (milestone 6)
 
@@ -9841,3 +9883,18 @@ user code:
   all), creating saved tabs' models lazily (20 tabs restore in about 70 ms,
   mostly waiting on reads), and switching tabs (about 9 ms, most of it Monaco's
   `setModel`).
+
+### 2026-11-21: A pull request page that helps you finish the pull request
+
+- The page explains why a pull request can't merge yet and offers the fix in
+  place (ready for review, update branch, check out to resolve conflicts, turn
+  off auto-merge), instead of listing state alone.
+- Failed check logs open in the editor with links to project files, since the
+  editor can open the failing line, which the browser can't. Logs show only
+  the failed steps (`--log-failed`), which is what you read first.
+- Viewed checkboxes use GitHub's state rather than a local one, so a review
+  started in the browser continues here.
+- Suggestions apply to your working copy in the editor, not as a commit on
+  GitHub: you can run the tests before you commit, and undo works.
+- Checks refresh by polling every 15 seconds while any run. `gh` has no
+  subscription for check runs, and polling stops when the page changes.

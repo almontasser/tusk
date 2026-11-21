@@ -1,9 +1,10 @@
 // Pull requests through the GitHub CLI (`gh`): list, details, checks, reviews, line comments, and diffs.
 import { invoke } from "@tauri-apps/api/core";
 import type { monaco } from "./editor";
-import { diffCursor, git, gitOutput, gitTask, showDiff } from "./git";
-import { age, type Check, checkState, checksSummary } from "./gitparse";
-import { pick } from "./palette";
+import { diffCursor, git, gitOutput, gitStatus, gitTask, showDiff, showDiffs, showOutput } from "./git";
+import { actionsJob, age, type Check, checkState, checksSummary, cleanLog, sortChecks, suggestion } from "./gitparse";
+import { showCommitDiff } from "./history";
+import { confirm, pick } from "./palette";
 import { listNav } from "./listnav";
 import { errorText, showError, status, withProgress } from "./status";
 import { openTerminal } from "./terminal";
@@ -21,14 +22,23 @@ type PullRequest = {
   statusCheckRollup: Check[] | null;
   url: string;
 };
-type Details = PullRequest & {
+type Label = { name: string; color: string };
+/** A row of the list, with more than the status bar's lookup needs. */
+type ListedPullRequest = PullRequest & { state: string; labels: Label[]; updatedAt: string; additions: number; deletions: number };
+type Details = ListedPullRequest & {
+  id: string;
   body: string;
   headRefOid: string;
-  state: string;
   files: { path: string; additions: number; deletions: number }[];
   createdAt: string;
   comments: { author: Author; body: string; url: string; createdAt: string }[];
-  reviews: { author: Author; state: string; body: string; submittedAt: string }[];
+  reviews: { id: string; author: Author; state: string; body: string; submittedAt: string }[];
+  latestReviews: { author: Author; state: string }[];
+  reviewRequests: { login?: string; name?: string; slug?: string }[];
+  commits: { oid: string; messageHeadline: string; committedDate: string; authors: { login: string; name: string }[] }[];
+  mergeable: string;
+  mergeStateStatus: string;
+  autoMergeRequest: { mergeMethod: string } | null;
 };
 
 /** A comment on a line of the diff. `line` is null when the code it was on has changed since. */
@@ -36,10 +46,19 @@ type ReviewComment = { id: number; path: string; line: number | null; start_line
 /** A line comment and its replies. `node` is the thread's GraphQL ID, for resolving it. */
 type Thread = ReviewComment & { comments: ReviewComment[]; node?: string; resolved?: boolean };
 
-type Host = { root(): string; status(text: string): void; showView(name: "prs"): void };
+type Host = {
+  root(): string;
+  status(text: string): void;
+  showView(name: "prs"): void;
+  openAt(path: string, line: number): unknown;
+  /** Replaces lines of a file in its editor, if they still read `expected`. False when they don't. */
+  replaceLines(path: string, start: number, end: number, expected: string, text: string): Promise<boolean>;
+};
 
 const $ = (id: string) => document.getElementById(id)!;
 const FIELDS = "number,title,author,headRefName,baseRefName,isDraft,reviewDecision,statusCheckRollup,url";
+const LIST_FIELDS = `${FIELDS},state,labels,updatedAt,additions,deletions`;
+const DETAIL_FIELDS = `${LIST_FIELDS},id,body,headRefOid,files,comments,reviews,createdAt,latestReviews,reviewRequests,commits,mergeable,mergeStateStatus,autoMergeRequest`;
 const icons = { passed: "✓", failed: "✗", pending: "●", skipped: "–", none: "" };
 const reviews: Record<string, string> = { APPROVED: "Approved", CHANGES_REQUESTED: "Changes requested", REVIEW_REQUIRED: "Review required" };
 let host: Host;
@@ -109,14 +128,15 @@ export async function loadPullRequests() {
   const text = ($("pr-search") as HTMLInputElement).value.trim();
   // GitHub's search syntax, such as "label:bug" or "author:someone", works in the search box too.
   const search = [filter === "review" ? "review-requested:@me" : "", text].filter(Boolean).join(" ");
-  const args = [...(filter === "mine" ? ["--author", "@me"] : []), ...(search ? ["--search", search] : [])];
+  const state = ["closed", "merged", "all"].includes(filter) ? ["--state", filter] : [];
+  const args = [...(filter === "mine" ? ["--author", "@me"] : []), ...state, ...(search ? ["--search", search] : [])];
   $("pr-detail").hidden = true;
   $("pr-list-view").hidden = false;
   // Switching back to the view keeps the last list while it refreshes; a new project, filter, or search starts over.
   const key = `${host.root()}\0${filter}\0${text}`;
   if ($("pr-list").dataset.key !== key) ($("pr-list").dataset.key = key), (limit = 50), $("pr-list").replaceChildren(el("li", "muted", "Loading…"));
   try {
-    const prs: PullRequest[] = JSON.parse(await gh("pr", "list", "--limit", String(limit), "--json", FIELDS, ...args));
+    const prs: ListedPullRequest[] = JSON.parse(await gh("pr", "list", "--limit", String(limit), "--json", LIST_FIELDS, ...args));
     if ($("pr-list").dataset.key !== key) return; // A newer search replaced this one.
     const more = el("li", "pr-more");
     const button = el("button", "", "Load More");
@@ -158,21 +178,27 @@ function problemItem(what: string, e: unknown, retry: () => unknown = loadPullRe
   return li;
 }
 
-function prRow(pr: PullRequest) {
+function prRow(pr: ListedPullRequest) {
   const li = el("li", "pr");
   li.role = "option";
   li.dataset.key = String(pr.number);
   li.dataset.label = pr.title;
   const title = el("div", "pr-title", `#${pr.number} ${pr.title}`);
   if (pr.isDraft) title.prepend(el("span", "badge", "Draft"));
+  if (pr.state !== "OPEN") title.prepend(el("span", `badge state-${pr.state.toLowerCase()}`, pr.state === "MERGED" ? "Merged" : "Closed"));
   const checks = checksSummary(pr.statusCheckRollup);
   const meta = el("div", "pr-meta");
   meta.append(
     el("span", `checks-${checks}`, icons[checks]),
     ` ${pr.author.login} · ${pr.headRefName} → ${pr.baseRefName}`,
-    reviews[pr.reviewDecision] ? ` · ${reviews[pr.reviewDecision]}` : "",
+    reviews[pr.reviewDecision] ? ` · ${reviews[pr.reviewDecision]} · ` : " · ",
+    el("span", "added", `+${pr.additions}`),
+    " ",
+    el("span", "deleted", `−${pr.deletions}`),
+    when(pr.updatedAt),
   );
   li.append(title, meta);
+  if (pr.labels.length) li.append(labelRow(pr.labels));
   li.onclick = () => showPullRequest(pr.number);
   return li;
 }
@@ -190,10 +216,12 @@ export async function showPullRequest(number: number) {
   detail.dataset.number = String(number);
   let pr: Details;
   let threads: Thread[];
+  let viewed: Map<string, boolean>;
   try {
-    [pr, threads] = await Promise.all([
-      gh("pr", "view", String(number), "--json", `${FIELDS},body,headRefOid,state,files,comments,reviews,createdAt`).then(JSON.parse),
+    [pr, threads, viewed] = await Promise.all([
+      gh("pr", "view", String(number), "--json", DETAIL_FIELDS).then(JSON.parse),
       lineComments(number),
+      viewedFiles(number).catch(() => new Map<string, boolean>()),
       me(),
       loadPending(number).catch(() => null),
     ]);
@@ -206,50 +234,126 @@ export async function showPullRequest(number: number) {
     return;
   }
   await libraries;
+  const open = pr.state === "OPEN";
+  const reload = () => showPullRequest(number);
+  // Runs a `gh` command that changes the pull request, then shows it again.
+  const run = async (progress: string, args: string[], done: string, error: string) => {
+    if ((await withProgress(progress, () => gh(...args), { error })) === undefined) return;
+    host.status(done);
+    reload();
+  };
 
   const back = el("button", "link", "← All pull requests");
   back.onclick = loadPullRequests;
   const actions = el("div", "pr-actions");
-  const action = (label: string, run: () => unknown) => {
-    const b = el("button", "", label);
+  const action = (label: string, run: () => unknown, className = "") => {
+    const b = el("button", className, label);
     b.onclick = run;
     actions.append(b);
+    return b;
   };
   // gh fetches and checks out with git, which asks for a password or passphrase in the dialog through gitTask.
-  action("Check Out", () => gitTask(`Checking out #${number}…`, ["pr", "checkout", String(number)], `Can't check out #${number}`, { gh: true }).then((o) => o !== undefined && status(`Checked out #${number}.`, "app", "info")));
+  const checkOut = () => gitTask(`Checking out #${number}…`, ["pr", "checkout", String(number)], `Can't check out #${number}`, { gh: true }).then((o) => o !== undefined && status(`Checked out #${number}.`, "app", "info"));
+  if (open) action("Merge…", () => merge(pr), "primary").disabled = pr.isDraft;
+  action("Check Out", checkOut);
   action("Open in Browser", () => openUrl(pr.url));
-  action("Refresh", () => showPullRequest(number));
-  if (pr.state === "OPEN") action("Merge…", () => merge(pr));
+  action("More…", () => more(pr, run));
+  const refresh = el("button", "icon-button codicon codicon-refresh");
+  refresh.title = "Refresh";
+  refresh.onclick = reload;
+  actions.append(refresh);
+
+  // What stands between the pull request and merging, with the button that deals with it.
+  const banner = el("div", "pr-banner");
+  const say = (kind: string, text: string, button?: [string, () => unknown]) => {
+    const line = el("div", `pr-banner-line ${kind}`);
+    line.append(el("span", "", text));
+    if (button) {
+      const b = el("button", "link", button[0]);
+      b.onclick = button[1];
+      line.append(b);
+    }
+    banner.append(line);
+  };
+  if (pr.state === "MERGED") say("merged", `Merged into ${pr.baseRefName}.`);
+  else if (pr.state === "CLOSED") say("closed", "Closed without merging.", ["Reopen", () => run(`Reopening #${number}…`, ["pr", "reopen", String(number)], `Reopened #${number}`, `Can't reopen #${number}`)]);
+  else {
+    if (pr.isDraft) say("draft", "Draft: reviewers aren't asked yet, and it can't be merged.", ["Ready for Review", () => run(`Marking #${number} ready…`, ["pr", "ready", String(number)], `Marked #${number} ready for review`, `Can't mark #${number} ready`)]);
+    if (pr.mergeable === "CONFLICTING") say("bad", `Conflicts with ${pr.baseRefName}. Check out the branch and merge ${pr.baseRefName} into it to resolve them.`, ["Check Out", checkOut]);
+    else if (pr.mergeStateStatus === "BEHIND") say("warn", `Behind ${pr.baseRefName}.`, ["Update Branch", () => updateBranch(pr, run)]);
+    if (pr.autoMergeRequest) say("good", `Auto-merge is on (${pr.autoMergeRequest.mergeMethod.toLowerCase()}): it merges once checks and reviews pass.`, ["Turn Off", () => run(`Turning off auto-merge…`, ["pr", "merge", String(number), "--disable-auto"], `Turned off auto-merge for #${number}`, "Can't turn off auto-merge")]);
+    else if (pr.mergeStateStatus === "CLEAN") say("good", "Ready to merge.");
+    else if (pr.mergeStateStatus === "UNSTABLE") say("warn", "Checks that aren't required are failing, but it can be merged.");
+    else if (pr.mergeStateStatus === "BLOCKED") say("warn", pr.reviewDecision === "REVIEW_REQUIRED" ? "Merging is blocked: it needs an approving review." : pr.reviewDecision === "CHANGES_REQUESTED" ? "Merging is blocked: changes were requested." : "Merging is blocked by a required check or rule.");
+  }
 
   const checks = el("ul", "pr-checks");
   checks.role = "listbox";
   checks.ariaLabel = "Checks";
   listNav(checks);
-  for (const c of pr.statusCheckRollup ?? []) {
-    const state = checkState(c);
-    const li = el("li");
-    li.role = "option";
-    li.dataset.key = c.name ?? c.context ?? "";
-    li.append(el("span", `checks-${state}`, icons[state]), ` ${c.name ?? c.context}`);
-    const url = c.detailsUrl ?? c.targetUrl;
-    if (url) li.onclick = () => openUrl(url);
-    checks.append(li);
-  }
+  const checksHeading = el("h3");
+  drawChecks(pr, checks, checksHeading);
+  watchChecks(pr, checks, checksHeading);
 
   const files = el("ul", "pr-files");
   files.role = "listbox";
   files.ariaLabel = "Files";
   listNav(files);
+  const filesHeading = el("h3");
+  const countViewed = () => (filesHeading.textContent = `Files (${pr.files.length})${viewed.size ? ` · ${pr.files.filter((f) => viewed.get(f.path)).length} viewed` : ""}`);
+  countViewed();
   for (const f of pr.files) {
     const li = el("li");
     li.role = "option";
     li.dataset.key = f.path;
     li.dataset.label = f.path.split("/").pop()!;
+    // GitHub's own Viewed checkbox, so what you've read is the same here and in the browser.
+    if (viewed.has(f.path)) {
+      const box = el("input");
+      box.type = "checkbox";
+      box.checked = !!viewed.get(f.path);
+      box.title = "Viewed";
+      box.onclick = (e) => e.stopPropagation();
+      box.onchange = async () => {
+        try {
+          await setViewed(pr.id, f.path, box.checked);
+          viewed.set(f.path, box.checked);
+          li.classList.toggle("viewed", box.checked);
+          countViewed();
+        } catch (e) {
+          box.checked = !box.checked;
+          showError("Can't change the file's Viewed state", e);
+        }
+      };
+      li.append(box);
+      li.classList.toggle("viewed", box.checked);
+    }
     li.append(el("span", "name", ltr(f.path)), el("span", "added", `+${f.additions}`), el("span", "deleted", `−${f.deletions}`));
-    const count = threads.filter((t) => t.path === f.path).length;
-    if (count) li.append(el("span", "codicon codicon-comment", ` ${count}`));
+    const fileThreads = threads.filter((t) => t.path === f.path);
+    if (fileThreads.length) {
+      const open = fileThreads.filter((t) => !t.resolved).length;
+      const count = el("span", `codicon codicon-comment${open ? " unresolved" : ""}`, ` ${fileThreads.length}`);
+      count.title = `${fileThreads.length} ${fileThreads.length === 1 ? "thread" : "threads"}, ${open} unresolved`;
+      li.append(count);
+    }
     li.onclick = () => showFileDiff(pr, f.path, threads);
     files.append(li);
+  }
+
+  const commits = el("ul", "pr-files pr-commits");
+  commits.role = "listbox";
+  commits.ariaLabel = "Commits";
+  listNav(commits);
+  for (const c of pr.commits) {
+    const li = el("li");
+    li.role = "option";
+    li.dataset.key = c.oid;
+    li.dataset.label = c.messageHeadline;
+    li.append(el("span", "hash", c.oid.slice(0, 7)), el("span", "muted", c.messageHeadline), el("span", "pr-when", c.authors[0]?.login || c.authors[0]?.name || ""));
+    li.title = `${c.messageHeadline}\n${new Date(c.committedDate).toLocaleString()}`;
+    // The commits come with the pull request's head, which opening the page fetches.
+    li.onclick = () => prepareDiff(pr).then(() => showCommitDiff(c.oid), (e) => showError(`Can't fetch #${number}`, e));
+    commits.append(li);
   }
 
   const repo = repoUrl(pr);
@@ -265,24 +369,25 @@ export async function showPullRequest(number: number) {
     return item;
   };
   // A comment you can edit or delete when it's yours; it redraws in place while you do.
-  const editable = (user: string, body: string, api: string, at: string) => {
+  const editable = (user: string, body: string, target: Target, at: string, label = "") => {
     const item = el("div", "pr-comment");
-    const draw = () => item.replaceChildren(...commentBlock(user, body, api, repo, draw, () => showPullRequest(number), at));
+    const draw = () => item.replaceChildren(...commentBlock(user, body, target, repo, draw, reload, at, label));
     draw();
     return item;
   };
   // Your pending review isn't part of the conversation yet; it's listed below.
   for (const r of pr.reviews)
-    if (r.state !== "PENDING" && (r.body || r.state !== "COMMENTED")) timeline.push({ at: r.submittedAt, nodes: [entry(r.author.login, reviews[r.state] ?? r.state.toLowerCase(), r.body, r.submittedAt)] });
+    if (r.state !== "PENDING" && (r.body || r.state !== "COMMENTED"))
+      timeline.push({ at: r.submittedAt, nodes: [r.body ? editable(r.author.login, r.body, reviewTarget(r.id), r.submittedAt, reviews[r.state] ?? r.state.toLowerCase()) : entry(r.author.login, reviews[r.state] ?? r.state.toLowerCase(), r.body, r.submittedAt)] });
   for (const c of pr.comments) {
     const id = c.url.match(/#issuecomment-(\d+)$/)?.[1];
-    timeline.push({ at: c.createdAt, nodes: [id ? editable(c.author.login, c.body, `repos/{owner}/{repo}/issues/comments/${id}`, c.createdAt) : entry(c.author.login, "", c.body, c.createdAt)] });
+    timeline.push({ at: c.createdAt, nodes: [id ? editable(c.author.login, c.body, restTarget(`repos/{owner}/{repo}/issues/comments/${id}`), c.createdAt) : entry(c.author.login, "", c.body, c.createdAt)] });
   }
   // Line comments, each thread under a link to its place in the diff.
   for (const t of threads) {
     const where = el("button", "link pr-thread-link", `${t.path}${t.line ? `:${t.start_line && t.start_line !== t.line ? `${t.start_line}–` : ""}${t.line}` : " (outdated)"}${t.resolved ? " · resolved" : ""}`);
     where.onclick = () => showFileDiff(pr, t.path, threads, t);
-    timeline.push({ at: t.created_at, nodes: [where, ...t.comments.map((c) => editable(c.user, c.body, `repos/{owner}/{repo}/pulls/comments/${c.id}`, c.created_at))] });
+    timeline.push({ at: t.created_at, nodes: [where, ...t.comments.map((c) => editable(c.user, c.body, restTarget(`repos/{owner}/{repo}/pulls/comments/${c.id}`), c.created_at))] });
   }
   const time = (at: string) => Date.parse(at) || 0; // A missing date sorts first rather than breaking the order.
   timeline.sort((a, b) => time(a.at) - time(b.at));
@@ -290,6 +395,14 @@ export async function showPullRequest(number: number) {
   conversation.append(...timeline.flatMap((t) => t.nodes));
 
   const heading = (text: string) => el("h3", "", text);
+  const unresolved = threads.filter((t) => t.line && !t.resolved);
+  const conversationHeading = heading(`Conversation${threads.length ? ` (${threads.length} line ${threads.length === 1 ? "thread" : "threads"}${unresolved.length ? `, ${unresolved.length} unresolved` : ""})` : ""}`);
+  if (unresolved.length) {
+    const next = el("button", "link pr-heading-link", "Go to Unresolved");
+    next.title = "Open the first unresolved thread; each thread's Next Unresolved link goes on from there";
+    next.onclick = () => nextUnresolved(pr, threads);
+    conversationHeading.append(next);
+  }
   // Your line comments that wait for the review to be submitted. Click one to see it in the diff.
   const pendingComments = pending?.number === number ? pending.comments : [];
   const pendingList = el("ul", "pr-files");
@@ -301,7 +414,7 @@ export async function showPullRequest(number: number) {
     remove.title = "Delete this pending comment";
     remove.onclick = (e) => {
       e.stopPropagation();
-      deletePending(number, c).then(() => showPullRequest(number), (err) => showError(`Can't delete the pending comment`, err));
+      deletePending(number, c).then(reload, (err) => showError(`Can't delete the pending comment`, err));
     };
     li.append(remove);
     pendingList.append(li);
@@ -324,7 +437,7 @@ export async function showPullRequest(number: number) {
         if (event === "COMMENT" && !hasPending) await gh("pr", "comment", String(number), "--body", body);
         else await submitReview(pr, event, body);
         host.status(done);
-        showPullRequest(number);
+        reload();
       } catch (e) {
         showError(`Can't ${label.toLowerCase()}`, e);
         buttons.querySelectorAll("button").forEach((x) => (x.disabled = false));
@@ -333,28 +446,280 @@ export async function showPullRequest(number: number) {
     buttons.append(b);
   };
   reply(hasPending ? `Submit Review (${pendingComments.length})` : "Comment", "COMMENT", true, hasPending ? `Submitted your review on #${number}` : `Commented on #${number}`);
-  if (pr.state === "OPEN") {
+  if (open) {
     reply("Approve", "APPROVE", false, `Approved #${number}`);
     reply("Request Changes", "REQUEST_CHANGES", true, `Requested changes on #${number}`);
   }
+  // ⌘⏎ does the first button's action, as in the diff's comment box.
+  box.onkeydown = (e) => e.key === "Enter" && mod(e) && buttons.querySelector("button")!.click();
   review.append(box, buttons);
-  const meta = el("div", "pr-meta", `${pr.state.toLowerCase()} · ${pr.author.login} · ${pr.headRefName} → ${pr.baseRefName}`);
+  const meta = el("div", "pr-meta");
+  meta.append(`${pr.state.toLowerCase()} · ${pr.author.login} · ${pr.headRefName} → ${pr.baseRefName} · `, el("span", "added", `+${pr.additions}`), " ", el("span", "deleted", `−${pr.deletions}`), when(pr.createdAt));
   detail.replaceChildren(
     back,
     el("h2", "", `#${pr.number} ${pr.title}`),
     meta,
+    ...(pr.labels.length ? [labelRow(pr.labels)] : []),
+    reviewerRow(pr),
     actions,
-    heading(`Checks (${pr.statusCheckRollup?.length ?? 0})`),
+    banner,
+    checksHeading,
     checks,
-    heading(`Files (${pr.files.length})`),
+    filesHeading,
     files,
-    heading(`Conversation${threads.length ? ` (${threads.length} line ${threads.length === 1 ? "thread" : "threads"})` : ""}`),
+    heading(`Commits (${pr.commits.length})`),
+    commits,
+    conversationHeading,
     conversation,
     ...(pendingComments.length ? [heading(`Pending review (${pendingComments.length} ${pendingComments.length === 1 ? "comment" : "comments"})`), pendingList] : []),
     review,
   );
   // Fetch the head and base now, so opening a file's diff doesn't wait for the network.
   prepareDiff(pr).catch(() => {});
+}
+
+/** Labels as colored chips, in GitHub's colors. */
+function labelRow(labels: Label[]) {
+  const row = el("div", "pr-labels");
+  for (const l of labels) {
+    const chip = el("span", "pr-label", l.name);
+    chip.style.setProperty("--label", `#${l.color}`);
+    row.append(chip);
+  }
+  return row;
+}
+
+/** Who reviewed and how, and who's still asked to. */
+function reviewerRow(pr: Details) {
+  const row = el("div", "pr-meta pr-reviewers");
+  const marks: Record<string, [string, string]> = { APPROVED: ["✓", "checks-passed"], CHANGES_REQUESTED: ["✗", "checks-failed"], COMMENTED: ["💬", ""], DISMISSED: ["–", "checks-skipped"] };
+  const people: HTMLElement[] = [];
+  for (const r of pr.latestReviews) {
+    const [mark, color] = marks[r.state] ?? ["", ""];
+    const span = el("span", "", `${r.author.login} `);
+    span.append(el("span", color, mark));
+    span.title = reviews[r.state] ?? r.state.toLowerCase();
+    people.push(span);
+  }
+  for (const r of pr.reviewRequests) {
+    const span = el("span", "", `${r.login ?? r.name ?? r.slug} `);
+    span.append(el("span", "checks-pending", "●"));
+    span.title = "Review requested";
+    people.push(span);
+  }
+  row.append(people.length ? "Reviewers: " : "No reviewers");
+  people.forEach((p, i) => row.append(...(i ? [", "] : []), p));
+  return row;
+}
+
+/** Draws the checks, failed first, with a log link on failed GitHub Actions jobs and Re-run Failed in the heading. */
+function drawChecks(pr: Details, list: HTMLElement, heading: HTMLElement) {
+  const all = sortChecks(pr.statusCheckRollup ?? []);
+  const counts = { failed: 0, pending: 0, passed: 0, skipped: 0 };
+  all.forEach((c) => counts[checkState(c)]++);
+  const parts = [counts.failed && `${counts.failed} failed`, counts.pending && `${counts.pending} running`, counts.passed && `${counts.passed} passed`, counts.skipped && `${counts.skipped} skipped`].filter(Boolean);
+  heading.replaceChildren(`Checks${parts.length ? ` · ${parts.join(" · ")}` : " (none)"}`);
+  const failedRuns = [...new Set(all.filter((c) => checkState(c) === "failed").map((c) => actionsJob(c.detailsUrl)?.run).filter((r): r is string => !!r))];
+  if (failedRuns.length) {
+    const rerun = el("button", "link pr-heading-link", "Re-run Failed");
+    rerun.title = "Run the failed GitHub Actions jobs again";
+    rerun.onclick = async () => {
+      rerun.disabled = true;
+      for (const id of failedRuns) if ((await withProgress(`Re-running the failed jobs…`, () => gh("run", "rerun", id, "--failed"), { error: "Can't re-run the failed jobs" })) === undefined) return;
+      host.status(`Re-running the failed jobs of #${pr.number}.`);
+      showPullRequest(pr.number);
+    };
+    heading.append(rerun);
+  }
+  list.replaceChildren(
+    ...all.map((c) => {
+      const state = checkState(c);
+      const li = el("li");
+      li.role = "option";
+      li.dataset.key = c.name ?? c.context ?? "";
+      li.append(el("span", `checks-${state}`, icons[state]), el("span", "name-plain", ` ${c.name ?? c.context}`));
+      const url = c.detailsUrl ?? c.targetUrl;
+      if (url) li.onclick = () => openUrl(url);
+      const job = actionsJob(c.detailsUrl);
+      if (job && state === "failed") {
+        const log = el("button", "link", "Log");
+        log.title = "Show the failed steps' log; file paths in it open in the editor";
+        log.onclick = (e) => (e.stopPropagation(), showLog(c.name ?? "", job.job));
+        li.append(log);
+      }
+      return li;
+    }),
+  );
+}
+
+/** While checks run, reloads them every 15 seconds, redrawing only the checks, until the page shows something else. */
+function watchChecks(pr: Details, list: HTMLElement, heading: HTMLElement) {
+  if (checksSummary(pr.statusCheckRollup) !== "pending") return;
+  const shownHere = () => list.isConnected && !$("pr-detail").hidden && $("pr-detail").dataset.number === String(pr.number);
+  setTimeout(async function tick() {
+    if (!shownHere()) return;
+    try {
+      const { statusCheckRollup } = JSON.parse(await gh("pr", "view", String(pr.number), "--json", "statusCheckRollup"));
+      if (!shownHere()) return;
+      pr.statusCheckRollup = statusCheckRollup;
+      drawChecks(pr, list, heading);
+      if (checksSummary(statusCheckRollup) !== "pending") return updateBranchPullRequest();
+    } catch {
+      // Tried again on the next tick.
+    }
+    setTimeout(tick, 15000);
+  }, 15000);
+}
+
+/** Shows a failed job's log, with paths of project files in it as links that open them at their line. */
+async function showLog(name: string, job: string) {
+  const out = await withProgress(`Loading the log of ${name}…`, () => gh("run", "view", "--job", job, "--log-failed"), { error: `Can't load the log of ${name}` });
+  if (out === undefined) return;
+  const text = cleanLog(out) || "The log has no failed steps.";
+  showOutput(`${name}: failed steps`, text);
+  const pre = document.querySelector<HTMLElement>("#output-dialog .output-text");
+  if (pre) linkPaths(pre, text);
+}
+
+/**
+ * Turns paths in a CI log into links to the project's files. CI checks out to another folder, such as
+ * /home/runner/work/app/app, so each path is tried from each of its folders down until one is in the project.
+ */
+async function linkPaths(pre: HTMLElement, text: string) {
+  const pattern = /((?:[\w.@-]*\/)+[\w.@-]+\.[A-Za-z]\w*)(?::(\d+))?/g;
+  // ponytail: the first 100 distinct paths are looked up; a log with more links only those.
+  const paths = [...new Set([...text.matchAll(pattern)].map((m) => m[1]))].slice(0, 100);
+  const found = new Map<string, string>();
+  await Promise.all(
+    paths.map(async (path) => {
+      const parts = path.split("/").filter(Boolean);
+      for (let i = 0; i < parts.length; i++) {
+        const candidate = `${host.root()}/${parts.slice(i).join("/")}`;
+        if (await invoke<boolean>("path_exists", { path: candidate }).catch(() => false)) return void found.set(path, candidate);
+      }
+    }),
+  );
+  if (!found.size || !pre.isConnected) return;
+  const nodes: (string | HTMLElement)[] = [];
+  let last = 0;
+  for (const m of text.matchAll(pattern)) {
+    const file = found.get(m[1]);
+    if (!file) continue;
+    nodes.push(text.slice(last, m.index));
+    const a = el("a", "log-link", m[0]);
+    a.href = "#";
+    a.onclick = (e) => (e.preventDefault(), (pre.closest("dialog") as HTMLDialogElement | null)?.close(), host.openAt(file, Number(m[2] ?? 1)));
+    nodes.push(a);
+    last = m.index + m[0].length;
+  }
+  nodes.push(text.slice(last));
+  pre.replaceChildren(...nodes);
+}
+
+/** The pull request's actions that aren't buttons on its page. */
+function more(pr: Details, run: (progress: string, args: string[], done: string, error: string) => unknown) {
+  const n = String(pr.number);
+  const items = [
+    { label: "Edit Title…", run: () => editTitle(pr, run) },
+    { label: "Request Review…", run: () => requestReview(pr, run) },
+    { label: "Labels…", run: () => editLabels(pr, run) },
+    ...(pr.state === "OPEN"
+      ? [
+          pr.isDraft
+            ? { label: "Mark Ready for Review", run: () => run(`Marking #${n} ready…`, ["pr", "ready", n], `Marked #${n} ready for review`, `Can't mark #${n} ready`) }
+            : { label: "Convert to Draft", run: () => run(`Converting #${n} to a draft…`, ["pr", "ready", n, "--undo"], `Converted #${n} to a draft`, `Can't convert #${n} to a draft`) },
+          ...(pr.mergeStateStatus === "BEHIND" ? [{ label: `Update Branch from ${pr.baseRefName}…`, run: () => updateBranch(pr, run) }] : []),
+          {
+            label: "Close Pull Request…",
+            run: async () => (await confirm(`Close #${n} "${pr.title}" without merging?`, "Close Pull Request")) && run(`Closing #${n}…`, ["pr", "close", n], `Closed #${n}`, `Can't close #${n}`),
+          },
+        ]
+      : pr.state === "CLOSED"
+        ? [{ label: "Reopen Pull Request", run: () => run(`Reopening #${n}…`, ["pr", "reopen", n], `Reopened #${n}`, `Can't reopen #${n}`) }]
+        : []),
+    { label: "Copy Link", run: () => navigator.clipboard.writeText(pr.url).then(() => host.status(`Copied ${pr.url}`)) },
+    { label: "Copy Branch Name", run: () => navigator.clipboard.writeText(pr.headRefName).then(() => host.status(`Copied ${pr.headRefName}`)) },
+  ];
+  pick(`#${pr.number}`, () => items);
+}
+
+/** Brings the base branch's changes into the pull request on GitHub, by a merge or a rebase. */
+function updateBranch(pr: Details, run: (progress: string, args: string[], done: string, error: string) => unknown) {
+  const n = String(pr.number);
+  pick(`Update #${n} from ${pr.baseRefName}`, () => [
+    { label: `Merge ${pr.baseRefName} into ${pr.headRefName}`, run: () => run(`Updating #${n}…`, ["pr", "update-branch", n], `Updated #${n} from ${pr.baseRefName}`, `Can't update #${n}`) },
+    { label: `Rebase ${pr.headRefName} onto ${pr.baseRefName}`, detail: "Rewrites the branch's commits", run: () => run(`Rebasing #${n}…`, ["pr", "update-branch", n, "--rebase"], `Rebased #${n} onto ${pr.baseRefName}`, `Can't rebase #${n}`) },
+  ]);
+}
+
+/** Asks for a new title, starting from the current one. */
+function editTitle(pr: Details, run: (progress: string, args: string[], done: string, error: string) => unknown) {
+  pick(
+    "Title",
+    (q) => {
+      const title = q.trim();
+      return title && title !== pr.title ? [{ label: `Rename to "${title}"`, run: () => run(`Renaming #${pr.number}…`, ["pr", "edit", String(pr.number), "--title", title], `Renamed #${pr.number}`, `Can't rename #${pr.number}`) }] : [];
+    },
+    0,
+    { value: pr.title, title: `Edit the title of #${pr.number}` },
+  );
+}
+
+/** Asks for someone to review, from the people who can be assigned in the repository. */
+function requestReview(pr: Details, run: (progress: string, args: string[], done: string, error: string) => unknown) {
+  const people = gh("api", "--paginate", "repos/{owner}/{repo}/assignees", "--jq", ".[].login").then((out) => out.split("\n").filter(Boolean));
+  const asked = new Set([...pr.reviewRequests.map((r) => r.login), ...pr.latestReviews.map((r) => r.author.login)]);
+  pick("Request a review from", async (q) => {
+    const logins = (await people.catch((e) => (showError("Can't list the people who can review", e), [] as string[]))).filter((l) => l !== pr.author.login);
+    return logins
+      .filter((l) => l.toLowerCase().includes(q.toLowerCase()))
+      .map((l) => ({ label: l, detail: asked.has(l) ? "asked again" : undefined, run: () => run(`Requesting a review from ${l}…`, ["pr", "edit", String(pr.number), "--add-reviewer", l], `Asked ${l} to review #${pr.number}`, `Can't request a review from ${l}`) }));
+  });
+}
+
+/** Adds or removes a label, from the repository's labels. */
+function editLabels(pr: Details, run: (progress: string, args: string[], done: string, error: string) => unknown) {
+  const labels = gh("label", "list", "--limit", "500", "--json", "name,description").then((out) => JSON.parse(out) as { name: string; description: string }[]);
+  const has = new Set(pr.labels.map((l) => l.name));
+  pick("Add or remove a label", async (q) => {
+    const all = await labels.catch((e) => (showError("Can't list the labels", e), []));
+    return all
+      .filter((l) => l.name.toLowerCase().includes(q.toLowerCase()))
+      .sort((a, b) => Number(has.has(b.name)) - Number(has.has(a.name)))
+      .map((l) => ({
+        label: `${has.has(l.name) ? "✓ " : ""}${l.name}`,
+        detail: has.has(l.name) ? "remove" : l.description || undefined,
+        run: () => run(`Changing the labels of #${pr.number}…`, ["pr", "edit", String(pr.number), has.has(l.name) ? "--remove-label" : "--add-label", l.name], `${has.has(l.name) ? "Removed" : "Added"} ${l.name}`, "Can't change the labels"),
+      }));
+  });
+}
+
+// ponytail: the first 100 files per page, all pages; GitHub has no Viewed state on very large pull requests.
+const VIEWED = `query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) { files(first: 100, after: $endCursor) { nodes { path viewerViewedState } pageInfo { hasNextPage endCursor } } } }
+}`;
+
+/** Which files you marked Viewed on GitHub, by path. */
+async function viewedFiles(number: number) {
+  const jq = ".data.repository.pullRequest.files.nodes[] | [.path, .viewerViewedState == \"VIEWED\"]";
+  const out = await gh("api", "graphql", "--paginate", "-F", "owner={owner}", "-F", "name={repo}", "-F", `number=${number}`, "-f", `query=${VIEWED}`, "--jq", jq);
+  return new Map<string, boolean>(out.split("\n").filter(Boolean).map((l) => JSON.parse(l)));
+}
+
+const setViewed = (id: string, path: string, viewed: boolean) => {
+  const mutation = viewed ? "markFileAsViewed" : "unmarkFileAsViewed";
+  return gh("api", "graphql", "-f", `query=mutation($id: ID!, $path: String!) { ${mutation}(input: { pullRequestId: $id, path: $path }) { clientMutationId } }`, "-f", `id=${id}`, "-f", `path=${path}`);
+};
+
+/** Opens the next unresolved thread after `after`, in the order of the files, or the first one. */
+function nextUnresolved(pr: Details, threads: Thread[], after?: Thread) {
+  const order = (t: Thread) => [pr.files.findIndex((f) => f.path === t.path), t.line ?? 0];
+  const open = threads.filter((t) => t.line && !t.resolved).sort((a, b) => order(a)[0] - order(b)[0] || order(a)[1] - order(b)[1]);
+  if (!open.length) return host.status("No unresolved threads.");
+  const i = after ? open.findIndex((t) => t.id === after.id) : -1;
+  const next = open[(i + 1) % open.length];
+  if (after && next.id === after.id) return host.status("This is the only unresolved thread.");
+  showFileDiff(pr, next.path, threads, next);
 }
 
 /**
@@ -390,15 +755,15 @@ async function lineComments(number: number): Promise<Thread[]> {
   return [...threads.values()];
 }
 
-// ponytail: the first 100 threads; a pull request with more shows the rest as unresolved, without Resolve.
-const THREADS = `query($owner: String!, $name: String!, $number: Int!) {
-  repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100) { nodes { id isResolved comments(first: 1) { nodes { databaseId } } } } } }
+// gh's --paginate follows $endCursor through every page of threads.
+const THREADS = `query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100, after: $endCursor) { nodes { id isResolved comments(first: 1) { nodes { databaseId } } } pageInfo { hasNextPage endCursor } } } }
 }`;
 
 /** Each thread's GraphQL ID and whether it's resolved, by the REST ID of its first comment. */
 async function threadStates(number: number) {
   const jq = ".data.repository.pullRequest.reviewThreads.nodes[] | {id, resolved: .isResolved, first: .comments.nodes[0].databaseId}";
-  const out = await gh("api", "graphql", "-F", "owner={owner}", "-F", "name={repo}", "-F", `number=${number}`, "-f", `query=${THREADS}`, "--jq", jq);
+  const out = await gh("api", "graphql", "--paginate", "-F", "owner={owner}", "-F", "name={repo}", "-F", `number=${number}`, "-f", `query=${THREADS}`, "--jq", jq);
   const lines: { id: string; resolved: boolean; first: number }[] = out.split("\n").filter(Boolean).map((l) => JSON.parse(l));
   return new Map(lines.map((t) => [t.first, { id: t.id, resolved: t.resolved }]));
 }
@@ -408,16 +773,25 @@ let myLogin = "";
 let loginLookup: Promise<unknown> | undefined;
 const me = () => (loginLookup ??= gh("api", "user", "--jq", ".login").then((l) => (myLogin = l.trim()), () => (loginLookup = undefined)));
 
-/** The comment being edited, and the one whose delete waits for a second click, by REST path. */
+/** The comment being edited, and the one whose delete waits for a second click, by their targets' keys. */
 let editing = "";
 let deleting = "";
 
+/** How to change a comment on GitHub: `key` names it, and a review's summary has no `remove`, since GitHub keeps it. */
+type Target = { key: string; save(body: string): Promise<unknown>; remove?(): Promise<unknown> };
+const restTarget = (api: string): Target => ({ key: api, save: (body) => gh("api", "--method", "PATCH", "-f", `body=${body}`, api), remove: () => gh("api", "--method", "DELETE", api) });
+const reviewTarget = (id: string): Target => ({
+  key: id,
+  save: (body) => gh("api", "graphql", "-f", "query=mutation($id: ID!, $body: String!) { updatePullRequestReview(input: { pullRequestReviewId: $id, body: $body }) { clientMutationId } }", "-f", `id=${id}`, "-f", `body=${body}`),
+});
+
 /**
- * A comment's author and text, with Edit and Delete when it's yours. `api` is the comment's REST path.
+ * A comment's author and text, with Edit and Delete when it's yours. `target` changes it on GitHub.
  * `redraw` draws it again after you start or cancel an edit, and `reload` fetches everything after GitHub changed it.
  */
-function commentBlock(user: string, body: string, api: string, repo: string, redraw: () => void, reload: () => unknown, at?: string): HTMLElement[] {
-  const meta = el("div", "pr-meta", user);
+function commentBlock(user: string, body: string, target: Target, repo: string, redraw: () => void, reload: () => unknown, at?: string, label = ""): HTMLElement[] {
+  const meta = el("div", "pr-meta", `${user}${label ? ` · ${label}` : ""}`);
+  const api = target.key;
   if (at) meta.append(when(at));
   if (!myLogin || user !== myLogin) return [meta, markdown(body, repo)];
   const link = (label: string, run: () => unknown) => {
@@ -425,9 +799,9 @@ function commentBlock(user: string, body: string, api: string, repo: string, red
     b.onclick = run;
     meta.append(" · ", b);
   };
-  const change = async (args: string[], what: string) => {
+  const change = async (request: () => Promise<unknown>, what: string) => {
     try {
-      await gh("api", ...args, api);
+      await request();
       editing = deleting = "";
       await reload();
     } catch (e) {
@@ -441,7 +815,7 @@ function commentBlock(user: string, body: string, api: string, repo: string, red
     text.value = body;
     const buttons = el("div", "pr-actions");
     const save = el("button", "primary", "Save");
-    save.onclick = () => text.value.trim() && change(["--method", "PATCH", "-f", `body=${text.value.trim()}`], "edit");
+    save.onclick = () => text.value.trim() && change(() => target.save(text.value.trim()), "edit");
     const cancel = el("button", "", "Cancel");
     cancel.onclick = () => ((editing = ""), redraw());
     text.onkeydown = (e) => {
@@ -455,11 +829,11 @@ function commentBlock(user: string, body: string, api: string, repo: string, red
   }
   if (deleting === api) {
     meta.append(" · Delete this comment on GitHub?");
-    link("Delete", () => change(["--method", "DELETE"], "delete"));
+    link("Delete", () => change(target.remove!, "delete"));
     link("Cancel", () => ((deleting = ""), redraw()));
   } else {
     link("Edit", () => ((editing = api), (deleting = ""), redraw()));
-    link("Delete", () => ((deleting = api), (editing = ""), redraw()));
+    if (target.remove) link("Delete", () => ((deleting = api), (editing = ""), redraw()));
   }
   return [meta, markdown(body, repo)];
 }
@@ -486,22 +860,26 @@ function merge(pr: Details) {
     { label: "Squash and merge", flag: "--squash" },
     { label: "Rebase and merge", flag: "--rebase" },
   ];
+  // Until checks and reviews pass, GitHub can merge on its own once they do.
+  const auto = pr.mergeStateStatus !== "CLEAN" && pr.mergeStateStatus !== "UNSTABLE" && pr.mergeStateStatus !== "HAS_HOOKS";
   pick(`Merge #${pr.number} into ${pr.baseRefName}`, () =>
     methods.map((m) => ({
       label: m.label,
       // Confirmed in the palette rather than a native dialog, which a page reload could leave stuck on screen.
-      run: () =>
+      run: () => {
+        const go = (extra: string[], verb: string) => async () => {
+          const merged = await withProgress(`${verb} #${pr.number}…`, () => gh("pr", "merge", String(pr.number), m.flag, ...extra), { error: `Can't merge #${pr.number}` });
+          if (merged !== undefined) host.status(extra.includes("--auto") ? `Turned on auto-merge for #${pr.number}` : `Merged #${pr.number}`);
+          showPullRequest(pr.number);
+        };
         pick(`${m.label}: #${pr.number} "${pr.title}" into ${pr.baseRefName} on GitHub?`, () => [
-          {
-            label: `${m.label} on GitHub`,
-            run: async () => {
-              const merged = await withProgress(`Merging #${pr.number}…`, () => gh("pr", "merge", String(pr.number), m.flag), { error: `Can't merge #${pr.number}` });
-              if (merged !== undefined) host.status(`Merged #${pr.number}`);
-              showPullRequest(pr.number);
-            },
-          },
+          ...(auto ? [{ label: "Merge When Ready (auto-merge)", detail: "GitHub merges once checks and reviews pass", run: go(["--auto"], "Turning on auto-merge for") }] : []),
+          { label: `${m.label} on GitHub`, run: go([], "Merging") },
+          // gh deletes the local branch too, switching to the base first when it's checked out here.
+          { label: `${m.label} and delete ${pr.headRefName}`, detail: "Deletes the branch on GitHub and here", run: go(["--delete-branch"], "Merging") },
           { label: "Cancel", run: () => {} },
-        ]),
+        ]);
+      },
     })),
   );
 }
@@ -536,7 +914,16 @@ function prepareDiff(pr: Details): Promise<string> {
   return mergeBases.get(key)!;
 }
 
-async function showFileDiff(pr: Details, path: string, threads: Thread[], at?: { line: number | null; side: "LEFT" | "RIGHT" }) {
+/**
+ * Opens a file's diff among all the pull request's files, so the diff's previous and next buttons (⌥⌘← and ⌥⌘→)
+ * go through them with their comments.
+ */
+function showFileDiff(pr: Details, path: string, threads: Thread[], at?: { line: number | null; side: "LEFT" | "RIGHT" }) {
+  const files = pr.files.map((f) => ({ path: f.path, load: async (): Promise<[string, string]> => ["", ""], show: () => showOneDiff(pr, f.path, threads, f.path === path ? at : undefined) }));
+  return showDiffs(files, `#${pr.number}: ${pr.baseRefName} ↔ ${pr.headRefName}`, Math.max(0, files.findIndex((f) => f.path === path)));
+}
+
+async function showOneDiff(pr: Details, path: string, threads: Thread[], at?: { line: number | null; side: "LEFT" | "RIGHT" }): Promise<boolean> {
   let diff: monaco.editor.IStandaloneDiffEditor;
   try {
     const slow = setTimeout(() => status(`Fetching #${pr.number}…`, "prs:progress"), 300);
@@ -546,7 +933,8 @@ async function showFileDiff(pr: Details, path: string, threads: Thread[], at?: {
     const action = { label: "Comment on Line", title: "Comment on the selected lines, or reply to the comments on the cursor's line", run: () => commentAtCursor() };
     diff = showDiff(path, original, modified, `#${pr.number}: ${pr.baseRefName} ↔ ${pr.headRefName}`, action);
   } catch (e) {
-    return showError(`Can't show the diff`, e);
+    showError(`Can't show the diff`, e);
+    return false;
   }
   diff.layout(); // The diff was hidden until now, so its editors have no width yet.
   shown = { pr, path, threads, diff, zones: [], model: diff.getModel()?.modified };
@@ -562,6 +950,21 @@ async function showFileDiff(pr: Details, path: string, threads: Thread[], at?: {
     // Computing the diff adds the other side's padding, which moves the line, so reveal it again after.
     const done = diff.onDidUpdateDiff(() => (done.dispose(), reveal()));
   }
+  return true;
+}
+
+/**
+ * Puts a suggestion into your copy of the file, in its editor, where you can review, undo, or save it. Only on the
+ * pull request's branch, and only while the lines still read as they did in the pull request.
+ */
+async function applySuggestion(pr: Details, t: Thread, text: string) {
+  if (gitStatus()?.branch !== pr.headRefName) return showError(`Check out #${pr.number} (${pr.headRefName}) to apply its suggestions.`);
+  const model = shown?.model;
+  if (!model || !t.line) return;
+  const start = t.start_line ?? t.line;
+  const expected = model.getValueInRange({ startLineNumber: start, startColumn: 1, endLineNumber: t.line, endColumn: model.getLineMaxColumn(t.line) });
+  if (await host.replaceLines(`${host.root()}/${t.path}`, start, t.line, expected, text)) host.status(`Applied the suggestion to ${t.path}:${start}. Review it and save.`);
+  else showError(`The lines of ${t.path} changed since the suggestion was made. Apply it by hand.`);
 }
 
 // ---- Line comments and pending reviews ----
@@ -680,13 +1083,22 @@ function drawZones() {
       continue;
     }
     if (t.start_line && t.start_line !== t.line) thread.append(el("div", "pr-meta", `On ${lines(t.start_line, t.line)}`));
-    for (const c of t.comments) thread.append(...commentBlock(c.user, c.body, `repos/{owner}/{repo}/pulls/comments/${c.id}`, repo, drawZones, reload, c.created_at));
+        for (const c of t.comments) {
+      thread.append(...commentBlock(c.user, c.body, restTarget(`repos/{owner}/{repo}/pulls/comments/${c.id}`), repo, drawZones, reload, c.created_at));
+      const suggested = t.side === "RIGHT" ? suggestion(c.body) : null;
+      if (suggested !== null) {
+        const apply = el("div", "pr-thread-actions");
+        action(apply, "Apply Suggestion Locally", () => applySuggestion(pr, t, suggested));
+        thread.append(apply);
+      }
+    }
     if (form?.reply?.id === t.id) thread.append(commentForm());
     else {
       const actions = el("div", "pr-thread-actions");
       action(actions, "Reply", () => ((form = { side: t.side, line: t.line!, start: t.line!, reply: t }), drawZones()));
       if (t.node) action(actions, t.resolved ? "Unresolve" : "Resolve", () => setResolved(t, !t.resolved));
       if (t.resolved) action(actions, "Hide", () => (expanded.delete(t.id), drawZones()));
+      if (threads.some((x) => x.id !== t.id && x.line && !x.resolved)) action(actions, "Next Unresolved", () => nextUnresolved(pr, threads, t));
       thread.append(actions);
     }
     addZone(editorFor(t.side), t.line, thread);
@@ -751,6 +1163,18 @@ function commentForm() {
     if (!inReview) button("Comment Now", (body) =>
       post([`repos/{owner}/{repo}/pulls/${pr.number}/comments`, "-f", `body=${body}`, "-f", `commit_id=${pr.headRefOid}`, "-f", `path=${path}`, "-F", `line=${f.line}`, "-f", `side=${f.side}`, ...range]),
     );
+  }
+  // On the new side, Suggest Change writes the lines into a suggestion block to edit, as on GitHub.
+  if (!f.reply && f.side === "RIGHT" && shown?.model) {
+    const model = shown.model;
+    const suggest = el("button", "", "Suggest Change");
+    suggest.title = "Insert the lines as a suggestion to edit";
+    suggest.onclick = () => {
+      const lines = model.getValueInRange({ startLineNumber: f.start, startColumn: 1, endLineNumber: f.line, endColumn: model.getLineMaxColumn(f.line) });
+      text.setRangeText(`${text.value && !text.value.endsWith("\n") ? "\n" : ""}\`\`\`suggestion\n${lines}\n\`\`\`\n`, text.selectionStart, text.selectionEnd, "end");
+      text.focus();
+    };
+    buttons.append(suggest);
   }
   const cancel = el("button", "", "Cancel");
   cancel.onclick = close;
