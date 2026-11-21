@@ -10222,3 +10222,16 @@ user code:
   `owner:branch`.
 - The pure logic lives in `prcreatedata.ts`, so the `gh pr create` arguments are
   tested without running the command.
+
+### 2026-11-21: Merge messages, the merge queue, and the admin bypass
+
+- Merge messages come from GitHub's GraphQL `viewerMergeHeadlineText` and
+  `viewerMergeBodyText`, not the repository's REST settings, which are null
+  unless you're an admin. The GraphQL fields work with read access and follow
+  the same settings.
+- Merge queue, admin, and branch facts come from one GraphQL query per page
+  load in `practions.ts`. The status box adds those lines when the query
+  returns, so merging still works if the query fails.
+- The admin bypass needs `viewerCanMergeAsAdmin`, `ADMIN` permission, and a
+  blocked merge or a merge queue, because GitHub reports
+  `viewerCanMergeAsAdmin` true for people who can only read.
