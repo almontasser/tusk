@@ -836,6 +836,9 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .pr-composer textarea { display: block; width: 100%; box-sizing: border-box; min-height: 64px; max-height: 40vh; resize: vertical; padding: 8px 10px; font: var(--ui); border-radius: 8px; }
 .pr-composer .pr-actions { justify-content: flex-end; align-items: center; margin-top: 8px; }
 .pr-hint { margin-right: auto; font-size: 12px; }
+/* Icon buttons in a row of text buttons, such as Saved replies: a plain centered icon, not the row's padded button. */
+.pr-actions button.icon-button { display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; background: none; }
+.pr-actions button.icon-button:hover:not(:disabled) { background: var(--hover); }
 .pr-mentions { position: fixed; z-index: 1000; min-width: 180px; margin: 0; padding: 4px; list-style: none; border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
 .pr-mentions li { padding: 3px 10px; border-radius: 5px; }
 .pr-mentions li.selected { background: var(--selected); }
