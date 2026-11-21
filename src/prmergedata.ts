@@ -9,7 +9,7 @@ export type MergeInfo = {
   viewerCanMergeAsAdmin: boolean;
   viewerCanEnableAutoMerge: boolean;
   isCrossRepository: boolean;
-  headRef: { id: string } | null;
+  headRef: { id: string; target: { oid: string } | null } | null;
   viewerCanDeleteHeadRef: boolean;
   baseRepository: { viewerPermission: string | null };
   /** GitHub's own default subject and body for each method, from the repository's settings. */
@@ -29,6 +29,7 @@ export type MergeState = {
   mergeStateStatus: string;
   autoMergeRequest: { mergeMethod: string } | null;
   headRefName: string;
+  headRefOid: string;
   commits: { messageHeadline: string }[];
 };
 
@@ -53,8 +54,9 @@ export const readyToMerge = (status: string) => status === "CLEAN" || status ===
 /**
  * Which merge actions to offer. Without `info` (the query failed), only auto-merge is offered, as before the query
  * existed. GitHub reports `viewerCanMergeAsAdmin` true for people who can only read, so the admin bypass also needs
- * admin permission and a blocked merge. Branch actions skip pull requests from forks, whose branch isn't in this
- * repository.
+ * admin permission, and something to bypass: a blocked merge or a merge queue. Branch actions skip pull requests from
+ * forks, whose branch isn't in this repository, and Delete skips a branch that moved on since the pull request, so it
+ * never deletes commits the pull request doesn't have.
  */
 export function mergeActions(pr: MergeState, info: MergeInfo | null): MergeActions {
   const open = pr.state === "OPEN" && !pr.isDraft;
@@ -64,11 +66,11 @@ export function mergeActions(pr: MergeState, info: MergeInfo | null): MergeActio
   return {
     enqueue: open && info.isMergeQueueEnabled && !info.isInMergeQueue,
     dequeue: pr.state === "OPEN" && info.isInMergeQueue,
-    admin: open && pr.mergeStateStatus === "BLOCKED" && info.viewerCanMergeAsAdmin && info.baseRepository.viewerPermission === "ADMIN",
+    admin: open && (pr.mergeStateStatus === "BLOCKED" || info.isMergeQueueEnabled) && info.viewerCanMergeAsAdmin && info.baseRepository.viewerPermission === "ADMIN",
     // A merge queue turns on auto-merge itself when checks are still running.
     auto: open && !info.isMergeQueueEnabled && !pr.autoMergeRequest && info.viewerCanEnableAutoMerge && !readyToMerge(pr.mergeStateStatus),
     revert: pr.state === "MERGED" && canWrite(info),
-    deleteBranch: sameRepo && !!info.headRef && canWrite(info),
+    deleteBranch: sameRepo && info.headRef?.target?.oid === pr.headRefOid && canWrite(info),
     restoreBranch: sameRepo && !info.headRef && info.viewerCanDeleteHeadRef,
   };
 }
@@ -100,6 +102,6 @@ export const queueStates: Record<string, string> = {
   QUEUED: "Waiting its turn",
   AWAITING_CHECKS: "Waiting for checks",
   MERGEABLE: "About to merge",
-  UNMERGEABLE: "Can't merge; GitHub removes it from the queue",
+  UNMERGEABLE: "Can't merge, so GitHub removes it from the queue",
   LOCKED: "Locked by the queue",
 };

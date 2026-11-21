@@ -460,9 +460,12 @@ When the base branch uses a merge queue, **Merge…** offers **Add to Merge
 Queue** instead of the methods, since the queue merges with the method its rules
 set. If required checks are still running, GitHub turns on auto-merge instead,
 and queues the pull request once they pass; the status bar says which happened.
-While the pull request is queued, the status box shows **Queued to merge** and
-the entry's state, and **Merge…** or **Remove…** takes it out of the queue. An
-admin can also choose **Merge Without the Queue…**.
+While the pull request is queued, the status box shows **Queued to merge** with
+its position and state, and **Merge…** or **Remove…** takes it out of the queue.
+An admin can also choose **Merge Without the Queue…**.
+
+While auto-merge is on, the page checks the pull request every 15 seconds, so
+it shows the merge when GitHub makes it.
 
 When the pull request conflicts with its base, **Resolve Conflicts…** checks out
 its branch (unless it's checked out already), fetches the base, and merges it
@@ -480,7 +483,9 @@ After a pull request merges or closes, its status box offers:
   request's last commit.
 
 Each of these asks you to confirm first. The branch actions aren't offered for
-a pull request from a fork, whose branch is in another repository.
+a pull request from a fork, whose branch is in another repository, and
+**Delete Branch…** isn't offered when the branch has commits the pull request
+doesn't have.
 
 ### Creating a pull request
 

@@ -12,6 +12,7 @@ const pr: MergeState = {
   mergeStateStatus: "CLEAN",
   autoMergeRequest: null,
   headRefName: "add-caching",
+  headRefOid: "abc123",
   commits: [{ messageHeadline: "Cache it" }, { messageHeadline: "Fix the key" }],
 };
 const info: MergeInfo = {
@@ -21,7 +22,7 @@ const info: MergeInfo = {
   viewerCanMergeAsAdmin: false,
   viewerCanEnableAutoMerge: true,
   isCrossRepository: false,
-  headRef: { id: "REF" },
+  headRef: { id: "REF", target: { oid: "abc123" } },
   viewerCanDeleteHeadRef: true,
   baseRepository: { viewerPermission: "WRITE" },
   squashTitle: null,
@@ -36,6 +37,8 @@ test("admin bypass needs admin permission and a blocked merge, not just viewerCa
   assert.equal(mergeActions(pr, { ...flag, baseRepository: { viewerPermission: "ADMIN" } }).admin, false);
   assert.equal(mergeActions({ ...pr, mergeStateStatus: "BLOCKED" }, { ...flag, baseRepository: { viewerPermission: "ADMIN" } }).admin, true);
   assert.equal(mergeActions({ ...pr, mergeStateStatus: "BLOCKED", isDraft: true }, { ...flag, baseRepository: { viewerPermission: "ADMIN" } }).admin, false);
+  // A merge queue is something to bypass even when nothing blocks the merge.
+  assert.equal(mergeActions(pr, { ...flag, isMergeQueueEnabled: true, baseRepository: { viewerPermission: "ADMIN" } }).admin, true);
 });
 
 test("auto-merge waits for something, and only where GitHub allows it", () => {
@@ -57,6 +60,8 @@ test("a merge queue offers to add or remove, not both", () => {
 test("branch actions after merging skip forks and match whether the branch exists", () => {
   const merged = { ...pr, state: "MERGED" };
   assert.deepEqual([mergeActions(merged, info).deleteBranch, mergeActions(merged, info).restoreBranch, mergeActions(merged, info).revert], [true, false, true]);
+  // A branch with commits the pull request doesn't have is never offered for deletion.
+  assert.equal(mergeActions(merged, { ...info, headRef: { id: "REF", target: { oid: "def456" } } }).deleteBranch, false);
   const gone = { ...info, headRef: null };
   assert.deepEqual([mergeActions(merged, gone).deleteBranch, mergeActions(merged, gone).restoreBranch], [false, true]);
   const fork = { ...info, isCrossRepository: true };

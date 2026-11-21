@@ -713,9 +713,10 @@ function statusCard(pr: Details, run: (progress: string, args: string[], done: s
   if (pr.autoMergeRequest) line("good", "clock", "Auto-merge is on", `It merges (${pr.autoMergeRequest.mergeMethod.toLowerCase()}) once checks and reviews pass.`, ["Turn Off", () => run(`Turning off auto-merge…`, ["pr", "merge", n, "--disable-auto"], `Turned off auto-merge for #${n}`, "Can't turn off auto-merge")]);
   extra((info) => {
     if (!info.isInMergeQueue) return;
-    // No position: with no queued pull request to read, whether GitHub counts it from 0 or 1 is unchecked.
+    // GitHub counts positions from 1: a queue's only entry is at position 1.
     const entry = info.mergeQueueEntry;
-    line("good", "list-ordered", `Queued to merge into ${pr.baseRefName}`, entry ? (queueStates[entry.state] ?? entry.state) : "", ["Remove…", () => dequeue(pr), "Remove from the merge queue"]);
+    const detail = entry ? `Position ${entry.position} in the queue. ${queueStates[entry.state] ?? entry.state}.` : "";
+    line("good", "list-ordered", `Queued to merge into ${pr.baseRefName}`, detail, ["Remove…", () => dequeue(pr), "Remove from the merge queue"]);
   });
   return card;
 }
@@ -772,12 +773,13 @@ function reviewerList(pr: Details, repo: string, reRequest?: (login: string) => 
  * the next tick. It stops once the tab closes or shows a newer version of the pull request.
  */
 function watchPullRequest(pr: Details, entry: Page) {
-  const settling = checksSummary(pr.statusCheckRollup) === "pending" || pr.mergeStateStatus === "UNKNOWN" || Date.now() - Date.parse(pr.createdAt) < 120_000;
+  // With auto-merge on, it also watches for GitHub to merge, so the box doesn't keep saying auto-merge is on.
+  const settling = checksSummary(pr.statusCheckRollup) === "pending" || pr.mergeStateStatus === "UNKNOWN" || Date.now() - Date.parse(pr.createdAt) < 120_000 || !!pr.autoMergeRequest;
   if (!settling || pr.state !== "OPEN") return;
   const page = entry.el;
   const drawn = page.firstElementChild;
   const current = () => pages.get(pr.number) === entry && page.firstElementChild === drawn;
-  const key = (p: Pick<Details, "statusCheckRollup" | "mergeStateStatus">) => JSON.stringify([p.mergeStateStatus, (p.statusCheckRollup ?? []).map(checkState)]);
+  const key = (p: Pick<Details, "statusCheckRollup" | "mergeStateStatus" | "state">) => JSON.stringify([p.state, p.mergeStateStatus, (p.statusCheckRollup ?? []).map(checkState)]);
   const before = key(pr);
   setTimeout(async function tick() {
     if (!current()) return;
@@ -786,7 +788,7 @@ function watchPullRequest(pr: Details, entry: Page) {
     const busy = !!page.querySelector(".pr-comment-form") || (page.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement);
     if (!busy) {
       try {
-        const now = JSON.parse(await gh("pr", "view", String(pr.number), "--json", "statusCheckRollup,mergeStateStatus"));
+        const now = JSON.parse(await gh("pr", "view", String(pr.number), "--json", "statusCheckRollup,mergeStateStatus,state"));
         if (!current()) return;
         if (key(now) !== before) {
           const result = checksSummary(now.statusCheckRollup);
@@ -804,7 +806,7 @@ function watchPullRequest(pr: Details, entry: Page) {
           return renderPullRequest(pr.number);
         }
         // Nothing changed, and nothing is left to wait for.
-        if (checksSummary(now.statusCheckRollup) !== "pending" && now.mergeStateStatus !== "UNKNOWN" && Date.now() - Date.parse(pr.createdAt) >= 120_000) return;
+        if (checksSummary(now.statusCheckRollup) !== "pending" && now.mergeStateStatus !== "UNKNOWN" && Date.now() - Date.parse(pr.createdAt) >= 120_000 && !pr.autoMergeRequest) return;
       } catch {
         // Tried again on the next tick.
       }

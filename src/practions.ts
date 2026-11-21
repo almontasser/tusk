@@ -2,7 +2,8 @@
 import { confirm, pick } from "./palette";
 import { showError, withProgress } from "./status";
 import { type Details, el, gh, host, hub, myLogin } from "./prshared";
-import { gitOperation, gitStatus, gitTask } from "./git";
+import { git, gitOperation, gitStatus, gitTask } from "./git";
+import { loadPullRequests } from "./prlist";
 import { isConflict } from "./gitparse";
 import { openMerge } from "./merge";
 import { type MergeInfo, mergeActions, mergeMessage, revertMessage } from "./prmergedata";
@@ -118,7 +119,7 @@ export function editLabels(pr: Details, run: (progress: string, args: string[], 
 
 const INFO_QUERY = `query($id: ID!) { node(id: $id) { ... on PullRequest {
   isMergeQueueEnabled isInMergeQueue mergeQueueEntry { position state } autoMergeRequest { mergeMethod }
-  viewerCanMergeAsAdmin viewerCanEnableAutoMerge isCrossRepository headRef { id } viewerCanDeleteHeadRef baseRepository { viewerPermission }
+  viewerCanMergeAsAdmin viewerCanEnableAutoMerge isCrossRepository headRef { id target { oid } } viewerCanDeleteHeadRef baseRepository { viewerPermission }
   squashTitle: viewerMergeHeadlineText(mergeType: SQUASH) squashBody: viewerMergeBodyText(mergeType: SQUASH)
   mergeTitle: viewerMergeHeadlineText(mergeType: MERGE) mergeBody: viewerMergeBodyText(mergeType: MERGE) } } }`;
 const queryInfo = (id: string) =>
@@ -293,11 +294,13 @@ export async function resolveConflicts(pr: Details, checkOut: () => Promise<bool
   if (busy) return showError(`A ${busy.kind} is in progress. Finish or abort it first`);
   const base = pr.baseRefName;
   if (!(await confirm(`Check out #${pr.number} and merge ${base} into ${pr.headRefName} here, to resolve the conflicts in the merge tool? Nothing is pushed.`, "Resolve Conflicts"))) return;
-  if (gitStatus()?.branch !== pr.headRefName && !(await checkOut())) return;
+  // A branch of the same name is the pull request's only when it has the pull request's head; a fork's `main` isn't yours.
+  const here = gitStatus()?.branch === pr.headRefName && (await git("merge-base", "--is-ancestor", pr.headRefOid, "HEAD").then(() => true, () => false));
+  if (!here && !(await checkOut())) return;
   // The same remote-tracking ref the pull request's diff fetches.
   if ((await gitTask(`Fetching ${base}…`, ["fetch", "--no-tags", "origin", `+refs/heads/${base}:refs/remotes/origin/${base}`], `Can't fetch ${base}`)) === undefined) return;
   // On conflicts gitTask says "<failure>: N files have conflicts…", and the merge tool opens on the first one.
-  if ((await gitTask(`Merging ${base} into ${pr.headRefName}…`, ["merge", "--no-edit", `origin/${base}`], `Merged ${base} with conflicts`)) !== undefined)
+  if ((await gitTask(`Merging ${base} into ${pr.headRefName}…`, ["merge", "--no-edit", `origin/${base}`], `Can't merge ${base} into ${pr.headRefName}`)) !== undefined)
     return host.status(`Merged ${base} into ${pr.headRefName} with no conflicts. Push to update #${pr.number}.`);
   const conflicted = gitStatus()?.files.filter(isConflict) ?? [];
   if (conflicted.length) openMerge(conflicted[0].path);
@@ -317,6 +320,7 @@ export async function revert(pr: Details) {
   if (out === undefined) return;
   const created = JSON.parse(out) as { number: number; title: string };
   host.status(`Created #${created.number}, which reverts #${n}`);
+  loadPullRequests();
   hub.showPullRequest(created.number, created.title);
 }
 

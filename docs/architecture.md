@@ -4116,8 +4116,13 @@ actions. The status box draws without waiting and appends the query's lines
 
 `mergeActions` in `prmergedata.ts` decides what to offer. GitHub returns
 `viewerCanMergeAsAdmin` true for people who can only read, so the admin bypass
-also needs `ADMIN` permission and a `BLOCKED` merge state. Branch actions skip
-forks. `mergeMessage` uses GitHub's `viewerMerge*Text`, which follows the
+also needs `ADMIN` permission and a `BLOCKED` merge state or a merge queue.
+Branch actions skip forks, and Delete needs `headRef.target.oid` to equal the
+pull request's `headRefOid`, so it never deletes commits the pull request
+doesn't have. **Resolve Conflicts…** skips the checkout only when the current
+branch has the same name and contains `headRefOid`. `watchPullRequest` keeps
+polling while auto-merge is on and includes `state` in what it compares, so the
+page redraws when GitHub merges. `mergeMessage` uses GitHub's `viewerMerge*Text`, which follows the
 repository's squash and merge message settings, and falls back to GitHub's
 defaults.
 
