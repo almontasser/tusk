@@ -162,7 +162,7 @@ screenshots with [Filament's demo app](https://github.com/filamentphp/demo)), ta
 | `src/merge.ts` | The three-pane merge tool |
 | `src/rebase.ts` | Interactive rebase |
 | `src/gitparse.ts` | Parsers for git output, line diffs, partial staging, merge alignment, and rebase todo lists |
-| `src/prs.ts` | Pull requests through the GitHub CLI |
+| `src/prs.ts` | Pull requests through the GitHub CLI: wires the `pr*.ts` modules together (see Architecture) |
 | `src/runner.ts` | Runs run configurations, the run widget, test run links, Run Anything, routes, and Tinker |
 | `src/runconfig.ts` | Run configuration types, their forms, validation, and the commands they build |
 | `src/runconfigdialog.ts` | The Run/Debug Configurations dialog |

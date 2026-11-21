@@ -3677,7 +3677,7 @@ in a dialog (hidden input for passwords and passphrases, plain for usernames,
 Yes or No for ssh's questions, by `askpassKind` in `gitparse.ts`), and
 `askpass_answer` sends the reply back. Answers live only in that round trip.
 Every git command that reaches a remote runs through `gitOutput`, including the
-pull request page's fetch of a pull request's head (`prepareDiff` in `prs.ts`).
+pull request page's fetch of a pull request's head (`prepareDiff` in `prdiff.ts`).
 **Check Out** runs `gh pr checkout` through `gitTask` with `gh: true`, in the
 same environment, so the git that `gh` starts asks in the dialog too.
 It writes git's process ID to a file in the app cache, so an aborted signal
@@ -3785,6 +3785,37 @@ isn't fully merged; the hash it had goes into a **Restore** action.
 
 ### Pull requests
 
+#### Modules
+
+The feature is split into flat `src/pr*.ts` modules. Each one imports only the
+modules above it in this list, so there are no import cycles:
+
+| Module | What's in it |
+|---|---|
+| `prshared.ts` | The types (`PullRequest`, `Details`, `Thread`, `Host`), the field lists, `host`, `gh`, `markdown`, the small DOM helpers (`el`, `icon`, `avatar`, `when`, `ltr`, labels), `me()` and `myLogin`, and `hub` |
+| `prthreads.ts` | Line threads (`lineComments`), editing and deleting your own comments (`commentBlock`, `Target`), and the comment box (`writer`, `mentions`) |
+| `prreview.ts` | Your pending review: loading it, adding and deleting its comments, and submitting it |
+| `prlist.ts` | The sidebar list, its review queue sections, the new-activity marks, and `problemItem` |
+| `prchecks.ts` | The Checks section (`drawChecks`), failed job logs, and links to project files in them |
+| `prdiff.ts` | A file's diff: threads as view zones, the comment form, the gutter **+**, pending comments, suggestions, Viewed, and **Since your review** |
+| `practions.ts` | Merging, the More Actions menu, Update Branch, and editing the title, reviewers, assignees, and labels |
+| `preditor.ts` | The current branch's pull request in the status bar, and its threads in the editor (`decorateComments`, `openThread`) |
+| `prpage.ts` | The pull request's editor tab: header, sections, status box, side column, the live refresh (`watchPullRequest`), and `threadsChanged` |
+| `prcreate.ts` | The New Pull Request form |
+| `prs.ts` | What `main.ts` imports: `initPullRequests`, `loadPullRequests`, `createPullRequest`, and `updateBranchPullRequest` |
+
+A few calls go up the list: a list row and the status bar button open a pull
+request, the checks, actions, and diff redraw its page, and the diff reloads
+threads everywhere. They go through `hub` in `prshared.ts`, whose
+`showPullRequest`, `renderPullRequest`, and `threadsChanged` `prs.ts` sets at
+startup. `hub` also holds the page's state that lower modules read. `preditor.ts`
+registers the Monaco listeners and the `tusk.prs.openThread` command when it
+loads; `prs.ts` imports it, so they run once at startup. A module that only
+builds on these, such as a new section, goes between the modules it uses and
+the ones that use it.
+
+#### Markdown, comments, and the diff
+
 Descriptions and comments are Markdown from other people, and the webview can
 call the app's commands, such as `run_capture`, so rendered HTML is a way to
 run commands on your Mac. `marked` renders them, and DOMPurify removes scripts,
@@ -3857,7 +3888,7 @@ the one comment.
 Pending comments live in your pending review on GitHub, so the browser and the
 editor show the same one. GitHub lists a pending review only to its author, so
 `loadPending` finds yours in `pulls/<n>/reviews` (state `PENDING`) and reads its
-comments through GraphQL (`PENDING` in `prs.ts`): REST's `reviews/<id>/comments`
+comments through GraphQL (`PENDING` in `prreview.ts`): REST's `reviews/<id>/comments`
 gives a pending comment only its diff `position`, with `line` null, so it never
 drew in the diff. GraphQL gives the line, and the side comes from the comment's
 review thread (`diffSide`). The REST API can add comments to a
@@ -3890,8 +3921,8 @@ until the new version is ready; only another pull request shows "Loading…".
 walking the text nodes and skipping links and code, so a reference inside a
 URL or code sample stays as it is.
 
-`src/prs.ts` runs the GitHub CLI (`gh pr list`, `gh pr view`) through
-`run_capture` and reads its JSON output. `checksSummary` in `gitparse.ts`
+The modules run the GitHub CLI (`gh pr list`, `gh pr view`) through
+`run_capture` (`gh` in `prshared.ts`) and read its JSON output. `checksSummary` in `gitparse.ts`
 reduces `statusCheckRollup` to one state. It accepts both check runs (with
 `status` and `conclusion`) and commit statuses (with `state`).
 
