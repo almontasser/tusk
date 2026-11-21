@@ -3792,16 +3792,16 @@ modules above it in this list, so there are no import cycles:
 
 | Module | What's in it |
 |---|---|
+| `prconversationdata.ts`, `prhunks.ts`, `prlistdata.ts`, `prcreatedata.ts`, `prdata.ts`, `prmergedata.ts`, `diffdata.ts` | Data code with no DOM or Tauri, each tested in its own `*.test.ts`: the timeline's events and emoji (`prconversationdata`), the lines GitHub takes comments on (`prhunks`), the list's queries (`prlistdata`), the new pull request's `gh` arguments (`prcreatedata`), `latestLoads` (`prdata`), merge messages and actions (`prmergedata`), and line mapping and image types for diffs (`diffdata`) |
 | `prshared.ts` | The types (`PullRequest`, `Details`, `Thread`, `Host`), the field lists, `host`, `gh`, `markdown`, the small DOM helpers (`el`, `icon`, `avatar`, `when`, `ltr`, labels), `me()` and `myLogin`, the open tabs (`pages`), and `hub` |
 | `prthreads.ts` | Line threads (`lineComments`), editing and deleting your own comments (`commentBlock`, `Target`), and the comment box (`writer`, `mentions`) |
-| `prdata.ts` | Data code with no DOM or Tauri, which `prdata.test.ts` tests: `latestLoads` |
-| `prmergedata.ts` | Merging's data code with no DOM or Tauri, which `prmergedata.test.ts` tests: `MergeInfo`, `mergeActions`, `mergeMessage`, `revertMessage` |
 | `prreview.ts` | Your pending review: loading it, adding and deleting its comments, and submitting it |
 | `prlist.ts` | The sidebar list, its review queue sections, the new-activity marks, and `problemItem` |
 | `prdiff.ts` | A file's diff: threads as view zones, the comment form, the gutter **+**, pending comments, suggestions, Viewed, and **Since your review** |
 | `prchecks.ts` | The Checks section (`drawChecks`), job logs and live steps, run controls, required checks, annotations as markers (`branchAnnotations`), deployments, and artifacts |
 | `practions.ts` | Merging, the More Actions menu, Update Branch, and editing the title, reviewers, assignees, and labels |
 | `preditor.ts` | The current branch's pull request in the status bar, and its threads in the editor (`decorateComments`, `openThread`) |
+| `prconversation.ts` | The Conversation tab's timeline: events, reactions, quoting, saved replies, hiding, and dismissing |
 | `prpage.ts` | The pull request's editor tab: header, sections, status box, side column, the live refresh (`watchPullRequest`), and `threadsChanged` |
 | `prcreate.ts` | The New Pull Request form |
 | `prs.ts` | What `main.ts` imports: `initPullRequests`, `loadPullRequests`, `createPullRequest`, and `updateBranchPullRequest` |
