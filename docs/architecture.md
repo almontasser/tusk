@@ -10160,3 +10160,28 @@ user code:
   `latestLoads`, where only the latest load stores its value, because hidden
   tabs now refresh too and a single global let one pull request's review stand
   in for another's.
+
+### 2026-11-21: The pull request list's sort, filters, and lazy checks
+
+- Sorting goes through GitHub search qualifiers (`sort:updated-desc`,
+  `sort:comments-desc`), because `gh pr list` has no `--sort` flag.
+- Check status in the closed lists loads per visible row, through one aliased
+  GraphQL query per batch of up to 25, because asking `gh pr list` for
+  `statusCheckRollup` on 50 closed pull requests makes GitHub time out.
+- ⌘Enter opens a pull request in the next pane; the app had no "open to the
+  side" modifier, and the editor-only ⌘Enter actions don't fire outside the
+  editor.
+- The filters and saved searches are project values (`pullRequestList`,
+  `pullRequestSearches`), like other views' choices.
+
+### 2026-11-21: The new pull request form names the base repository everywhere
+
+- The form finds the head repository from the branch's upstream remote, and
+  the base from its `parent` when it's a fork. Every `gh` call after that names
+  the base with `--repo`, `-R`, or `repos/OWNER/REPO`, since `{owner}/{repo}`
+  resolves to the GitHub CLI's default repository.
+- The check for an existing pull request lists by branch name and filters on
+  `headRepositoryOwner`, because `gh pr list --head` doesn't take
+  `owner:branch`.
+- The pure logic lives in `prcreatedata.ts`, so the `gh pr create` arguments are
+  tested without running the command.
