@@ -4098,6 +4098,44 @@ version with the lines in your file, through the host's `replaceLines`, and
 replaces them in the editor as one undoable edit only when they match and the
 pull request's branch is checked out.
 
+#### Creating a pull request
+
+`createPullRequest` in `prcreate.ts` draws the form, and `prcreatedata.ts`
+holds its pure logic, tested in `prcreatedata.test.ts`: template discovery,
+remote URL parsing, the `--head` spec, the `gh pr create` arguments, and the
+numstat parser.
+
+- **Repositories.** The head repository is the one behind the branch's
+  upstream remote (`origin` without one), read with `gh repo view <url>`. The
+  base repository is its `parent` when it's a fork, else `gh`'s own. Every
+  call after that names the base with `--repo`, `-R`, or `repos/OWNER/REPO`,
+  since `{owner}/{repo}` resolves to `gh`'s default repository, not the
+  chosen one.
+- **Head.** `gh pr create --head` takes `owner:branch` for a branch in another
+  repository; its help says an organization owner isn't supported yet.
+- **Existing pull request.** `gh pr list --head` doesn't take `owner:branch`,
+  so the form lists open pull requests by branch name and keeps the one whose
+  `headRepositoryOwner` is the head's owner. Same-named branches in other
+  forks don't count.
+- **Templates.** `git ls-files` with `:(icase)` pathspecs finds committed
+  templates in the root, `docs/`, and `.github/`, as single files or in a
+  `PULL_REQUEST_TEMPLATE` folder.
+- **Commits and files.** They compare `HEAD` with the base branch on the local
+  remote whose URL matches the base repository. The files come from
+  `git diff --numstat -z -M` and `--name-status` over `base...HEAD`, joined by
+  path. Each diff loads its old side from the merge base, so it matches the
+  three-dot counts. Without a matching remote, the form lists branches from
+  the GitHub API and shows no commits rather than compare with the wrong ref.
+- **Pickers.** People and labels load through `assignable` and `repoLabels` in
+  `practions.ts`, the same loaders as the pull request tab's pickers;
+  milestones are the open ones from `repos/OWNER/REPO/milestones`.
+- **Autosave.** The form saves to `localStorage` under
+  `pr-create:<root>:<branch>` 300 ms after each change, and removes the key
+  once `gh pr create` succeeds. Edit flags for the title and description
+  decide whether the commits or a template may still fill them.
+- **Description box.** `writer` and `mentions` from `prthreads.ts` get number
+  0, which has no page, so `@` suggests only the repository's people.
+
 ## Filament intelligence (milestone 6)
 
 Tusk's server completes Filament's fluent methods, such as

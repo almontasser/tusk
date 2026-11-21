@@ -441,11 +441,37 @@ base branch (the repository's default branch at first), then check the title
 and description. The title starts as the commit's subject when the branch has
 one commit, or as the branch's name; the description starts as the
 repository's pull request template, if it has one, or as a list of the
-commits. Below the form, you see the commits the pull request adds. Tick
-**Create as a draft** for a draft, then click **Create Pull Request** (or press
-⌘⏎). If the remote doesn't have the branch's commits yet, Tusk pushes it first.
-The new pull request opens in its tab. If the branch already has an open pull
-request, the form offers to open it instead.
+commits. The title shows a warning when you leave it empty. The description
+has **Write** and **Preview** tabs, and suggests people after `@`.
+
+If the repository has several templates (in a `PULL_REQUEST_TEMPLATE` folder),
+choose one from **Template**, or choose **None**. Switching templates replaces
+the description only while you haven't edited it.
+
+Click **+** next to **Reviewers**, **Assignees**, **Labels**, or **Milestone**
+to add one from the base repository, and click **×** on a chip to remove it.
+To ask a team for a review, type its `org/team` name in the reviewer list.
+
+Below the form, you see the commits the pull request adds and the files it
+changes since the branch left its base, with the lines each adds and removes.
+Click a file to see its diff. Tick **Create as a draft** for a draft, then
+click **Create Pull Request** (or press ⌘⏎). If the remote doesn't have the
+branch's commits yet, Tusk pushes it first. The new pull request opens in its
+tab. If the branch already has an open pull request, the form says so and
+offers to open it instead.
+
+The form keeps what you type, per project and branch, so closing the tab or
+restarting Tusk doesn't lose it. Tusk clears it once the pull request exists.
+
+#### From a fork
+
+When the branch pushes to a fork, the pull request goes to the fork's parent
+repository by default, as on GitHub. To pick another, such as the fork itself,
+use the repository list next to the base branch. To list the commits and files
+for a parent repository, add a remote for it (for example,
+`git remote add upstream <url>`) and fetch it. The GitHub CLI can't create a
+pull request from a fork that an organization owns, so the form warns you to
+create that one on GitHub.
 
 Pull requests need the GitHub CLI (`gh`), signed in with `gh auth login`.
 
