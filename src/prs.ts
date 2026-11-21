@@ -8,6 +8,7 @@ import { confirm, pick } from "./palette";
 import { listNav } from "./listnav";
 import { errorText, showError, status, withProgress } from "./status";
 import { closeView, openTerminal, showEditorView } from "./terminal";
+import { toast } from "./dom";
 import { isMac, mod } from "./platform.ts";
 
 type Author = { login: string };
@@ -32,7 +33,7 @@ type Details = ListedPullRequest & {
   files: { path: string; additions: number; deletions: number }[];
   createdAt: string;
   comments: { author: Author; body: string; url: string; createdAt: string }[];
-  reviews: { id: string; author: Author; state: string; body: string; submittedAt: string }[];
+  reviews: { id: string; author: Author; state: string; body: string; submittedAt: string; commit?: { oid: string } }[];
   latestReviews: { author: Author; state: string }[];
   reviewRequests: { login?: string; name?: string; slug?: string }[];
   commits: { oid: string; messageHeadline: string; committedDate: string; authors: { login: string; name: string }[] }[];
@@ -290,8 +291,38 @@ type Section = "conversation" | "commits" | "checks" | "files";
 /** The pull request open in the editor tab, and the section it shows. A refresh keeps the section and scroll. */
 let openNumber: number | undefined;
 let section: Section = "conversation";
-/** What you typed in the comment box, by pull request, so a refresh after an action keeps it. */
-const drafts = new Map<number, string>();
+/**
+ * What you typed in the comment box, by pull request, kept in this computer's storage per project, so a refresh,
+ * closing the tab, or restarting the app keeps it until you send it.
+ */
+const drafts = {
+  key: () => `pr-drafts:${host.root()}`,
+  all(): Record<string, string> {
+    try {
+      return JSON.parse(localStorage.getItem(this.key()) ?? "{}");
+    } catch {
+      return {};
+    }
+  },
+  get(number: number): string | undefined {
+    return this.all()[number];
+  },
+  set(number: number, text: string) {
+    const all = this.all();
+    if (text.trim()) all[number] = text;
+    else delete all[number];
+    try {
+      localStorage.setItem(this.key(), JSON.stringify(all));
+    } catch {
+      // Storage is off; the draft lasts until the tab redraws.
+    }
+  },
+  delete(number: number) {
+    this.set(number, "");
+  },
+};
+/** Pull requests whose Files tab shows only the changes since your last review. */
+const sinceMode = new Set<number>();
 
 /** Opens a pull request in its editor tab. */
 export function showPullRequest(number: number, title = "") {
@@ -340,6 +371,7 @@ async function renderPullRequest(number: number) {
   if (page.dataset.number !== String(number)) return; // Another pull request opened meanwhile.
   viewedOf = { number, files: viewed };
   markSeen(number, pr.updatedAt);
+  participants = [...new Set([pr.author.login, ...pr.latestReviews.map((r) => r.author.login), ...pr.comments.map((c) => c.author.login), ...threads.flatMap((t) => t.comments.map((c) => c.user)), ...pr.assignees.map((a) => a.login)])];
   const open = pr.state === "OPEN";
   const reload = () => renderPullRequest(number);
   // Runs a `gh` command that changes the pull request, then shows it again.
@@ -415,7 +447,7 @@ async function renderPullRequest(number: number) {
     conversation: () => conversationSection(),
     commits: () => [commitList()],
     checks: () => checksSection(),
-    files: () => fileSection(),
+    files: () => fileTab(),
   };
   const show = (s: Section) => {
     section = s;
@@ -582,7 +614,9 @@ async function renderPullRequest(number: number) {
     text.placeholder = hasPending ? "Summarize your review (Markdown, optional)" : "Leave a comment (Markdown)";
     text.setAttribute("aria-label", "Comment");
     text.value = drafts.get(number) ?? "";
-    text.oninput = () => drafts.set(number, text.value);
+    // Typing is saved as you pause, so a long comment doesn't write storage on every key.
+    let saving: ReturnType<typeof setTimeout> | undefined;
+    text.oninput = () => (clearTimeout(saving), (saving = setTimeout(() => drafts.set(number, text.value), 300)));
     const buttons = el("div", "pr-actions");
     // With pending comments, each button submits them as one review. Without, Comment adds a comment
     // to the conversation, and Approve and Request Changes submit a review with only the summary.
@@ -595,6 +629,7 @@ async function renderPullRequest(number: number) {
         try {
           if (event === "COMMENT" && !hasPending) await gh("pr", "comment", String(number), "--body", body);
           else await submitReview(pr, event, body);
+          clearTimeout(saving);
           drafts.delete(number);
           host.status(done);
           reload();
@@ -656,19 +691,49 @@ async function renderPullRequest(number: number) {
   }
 
   // ---- Files ----
-  function fileSection() {
+  /**
+   * The Files tab. After you've reviewed and the author pushed again, it can show only what changed since your
+   * review, as GitHub's "changes since your last review" does.
+   */
+  function fileTab(): HTMLElement[] {
+    const oid = lastReviewed(pr);
+    if (!oid) return fileSection();
+    const since = sinceMode.has(number);
+    const toggle = el("div", "segmented pr-scope");
+    const option = (label: string, on: boolean, title: string) => {
+      const b = el("button", "", label);
+      b.title = title;
+      b.setAttribute("aria-pressed", String(on === since));
+      b.onclick = () => (on ? sinceMode.add(number) : sinceMode.delete(number), show("files"));
+      toggle.append(b);
+    };
+    option("All changes", false, `Every file the pull request changes, from ${pr.baseRefName}`);
+    option(`Since your review (${oid.slice(0, 7)})`, true, "Only what changed after the commit you last reviewed");
+    if (!since) return [toggle, ...fileSection()];
+    const holder = el("div");
+    holder.append(el("p", "muted", "Comparing with your last review…"));
+    sinceReview(pr, oid).then(
+      (changes) => holder.isConnected && holder.replaceChildren(...(changes.files.length ? fileSection(changes) : [el("p", "muted", "Nothing changed since your review.")])),
+      (e) => holder.isConnected && holder.replaceChildren(el("p", "muted", `Can't compare with your last review: ${errorText(e)}`)),
+    );
+    return [toggle, holder];
+  }
+
+  function fileSection(since?: Since) {
+    const list = since?.files ?? pr.files;
     const bar = el("div", "pr-section-bar");
     const progress = el("progress");
     const count = el("span", "muted");
     const countViewed = () => {
-      const n = pr.files.filter((f) => viewed.get(f.path)).length;
-      progress.max = pr.files.length;
+      const n = list.filter((f) => viewed.get(f.path)).length;
+      progress.max = list.length;
       progress.value = n;
-      count.textContent = `${n} of ${pr.files.length} viewed`;
+      count.textContent = `${n} of ${list.length} viewed`;
     };
     countViewed();
     const totals = el("span", "pr-totals");
-    totals.append(el("span", "added", `+${pr.additions}`), " ", el("span", "deleted", `−${pr.deletions}`));
+    const sum = (k: "additions" | "deletions") => list.reduce((n, f) => n + f[k], 0);
+    totals.append(el("span", "added", `+${sum("additions")}`), " ", el("span", "deleted", `−${sum("deletions")}`));
     bar.append(totals, ...(viewed.size ? [progress, count] : []));
     const unresolved = threads.filter((t) => t.line && !t.resolved);
     if (unresolved.length) {
@@ -681,7 +746,7 @@ async function renderPullRequest(number: number) {
     files.role = "listbox";
     files.ariaLabel = "Files";
     listNav(files);
-    const rows = pr.files.map((f) => {
+    const rows = list.map((f) => {
       const li = el("li");
       li.role = "option";
       li.dataset.key = f.path;
@@ -720,11 +785,11 @@ async function renderPullRequest(number: number) {
         li.append(comments);
       }
       li.append(el("span", "added", `+${f.additions}`), el("span", "deleted", `−${f.deletions}`), diffBar(f.additions, f.deletions));
-      li.onclick = () => showFileDiff(pr, f.path, threads);
+      li.onclick = () => showFileDiff(pr, f.path, threads, undefined, since);
       return { path: f.path, li };
     });
     // Many files group under their folders, as in GitHub's file tree, and a box filters them by path.
-    const grouped = pr.files.length > 5;
+    const grouped = list.length > 5;
     files.classList.toggle("grouped", grouped);
     const draw = (query: string) => {
       const q = query.trim().toLowerCase();
@@ -745,7 +810,7 @@ async function renderPullRequest(number: number) {
       if (!shown.length) files.replaceChildren(el("li", "muted", "No files match."));
     };
     draw("");
-    if (pr.files.length > 8) {
+    if (list.length > 8) {
       const filter = el("input");
       filter.type = "search";
       filter.placeholder = "Filter files";
@@ -827,6 +892,71 @@ async function renderPullRequest(number: number) {
   prepareDiff(pr).catch(() => {});
 }
 
+/** People in the pull request on screen (author, reviewers, commenters), suggested first after "@". */
+let participants: string[] = [];
+let assignable: { root: string; logins: Promise<string[]> } | undefined;
+
+/**
+ * Suggests people after "@" in a comment box: the pull request's participants first, then everyone who can be
+ * assigned in the repository. ↑ and ↓ choose, Enter or Tab inserts, and Escape closes the list.
+ */
+function mentions(text: HTMLTextAreaElement) {
+  if (assignable?.root !== host.root())
+    assignable = { root: host.root(), logins: gh("api", "--paginate", "repos/{owner}/{repo}/assignees", "--jq", ".[].login").then((o) => o.split("\n").filter(Boolean), () => []) };
+  const list = el("ul", "pr-mentions");
+  list.role = "listbox";
+  let matches: string[] = [];
+  let index = 0;
+  const close = () => (list.remove(), (matches = []));
+  const query = () => text.value.slice(0, text.selectionStart).match(/(?:^|[\s(])@([\w-]*)$/)?.[1];
+  const draw = () => {
+    list.replaceChildren(
+      ...matches.map((login, i) => {
+        const li = el("li", i === index ? "selected" : "", login);
+        li.role = "option";
+        li.onmousedown = (e) => (e.preventDefault(), insert(login));
+        return li;
+      }),
+    );
+    const box = text.getBoundingClientRect();
+    list.style.left = `${box.left}px`;
+    list.style.top = `${box.bottom + 2}px`;
+    if (!list.isConnected) document.body.append(list);
+  };
+  const insert = (login: string) => {
+    const q = query() ?? "";
+    const at = text.selectionStart;
+    text.setRangeText(`${login} `, at - q.length, at, "end");
+    text.dispatchEvent(new Event("input"));
+    close();
+  };
+  text.addEventListener("input", async () => {
+    const q = query();
+    if (q === undefined) return close();
+    const all = [...new Set([...participants, ...(await assignable!.logins)])].filter((l) => l !== myLogin);
+    if (query() !== q) return; // You typed on while the list loaded.
+    matches = all.filter((l) => l.toLowerCase().startsWith(q.toLowerCase())).slice(0, 8);
+    index = 0;
+    if (!matches.length) return close();
+    draw();
+  });
+  text.addEventListener(
+    "keydown",
+    (e) => {
+      if (!matches.length) return;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") index = (index + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length, draw();
+      else if (e.key === "Enter" || e.key === "Tab") insert(matches[index]);
+      else if (e.key === "Escape") close();
+      else return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    },
+    true,
+  );
+  text.addEventListener("blur", close);
+  return text;
+}
+
 /** A Markdown text box with Write and Preview tabs, which renders the text as it will show on GitHub. */
 function writer(text: HTMLTextAreaElement, repo: string) {
   const box = el("div", "pr-writer");
@@ -850,7 +980,7 @@ function writer(text: HTMLTextAreaElement, repo: string) {
   tab("Write", false);
   tab("Preview", true);
   tabs.lastElementChild!.setAttribute("aria-pressed", "false");
-  box.append(tabs, text, preview);
+  box.append(tabs, mentions(text), preview);
   return box;
 }
 
@@ -1081,13 +1211,24 @@ function watchPullRequest(pr: Details) {
   const before = key(pr);
   setTimeout(async function tick() {
     if (!current()) return;
-    const busy = page.hidden || !!page.closest("[hidden]") || editing !== "" || page.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement;
+    // A hidden tab keeps watching, so it can tell you when checks finish while you work elsewhere; only a comment
+    // you're writing holds the redraw.
+    const busy = editing !== "" || (page.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement);
     if (!busy) {
       try {
         const now = JSON.parse(await gh("pr", "view", String(pr.number), "--json", "statusCheckRollup,mergeStateStatus"));
         if (!current()) return;
         if (key(now) !== before) {
-          if (checksSummary(now.statusCheckRollup) !== "pending") updateBranchPullRequest();
+          const result = checksSummary(now.statusCheckRollup);
+          if (checksSummary(pr.statusCheckRollup) === "pending" && result !== "pending") {
+            updateBranchPullRequest();
+            const failed = (now.statusCheckRollup as Check[]).filter((c) => checkState(c) === "failed").length;
+            const visible = !page.hidden && !page.closest("[hidden]");
+            const message = failed ? `${failed} ${failed === 1 ? "check" : "checks"} failed on #${pr.number}.` : `Checks passed on #${pr.number}.`;
+            // Said in the status bar, and in a toast that opens the pull request when its tab isn't in front.
+            status(message, "app", "info");
+            if (!visible) toast(message, { kind: failed ? "error" : "info", action: { label: `Open #${pr.number}`, run: () => showPullRequest(pr.number, pr.title) }, timeout: 15000 });
+          }
           return renderPullRequest(pr.number);
         }
         // Nothing changed, and nothing is left to wait for.
@@ -1361,7 +1502,7 @@ function commentBlock(user: string, body: string, target: Target, repo: string, 
   };
   if (editing === api) {
     const box = el("div", "pr-comment-form");
-    const text = el("textarea");
+    const text = mentions(el("textarea"));
     text.rows = 4;
     text.value = body;
     const buttons = el("div", "pr-actions");
@@ -1515,14 +1656,14 @@ function prepareDiff(pr: Details): Promise<string> {
  * Opens a file's diff among all the pull request's files, so the diff's previous and next buttons (⌥⌘← and ⌥⌘→)
  * go through them with their comments.
  */
-function showFileDiff(pr: Details, path: string, threads: Thread[], at?: { line: number | null; side: "LEFT" | "RIGHT" }) {
-  const label = `#${pr.number}: ${pr.baseRefName} ↔ ${pr.headRefName}`;
+function showFileDiff(pr: Details, path: string, threads: Thread[], at?: { line: number | null; side: "LEFT" | "RIGHT" }, since?: Since) {
+  const label = since ? `#${pr.number}: since your review (${since.oid.slice(0, 7)})` : `#${pr.number}: ${pr.baseRefName} ↔ ${pr.headRefName}`;
   const viewed = viewedOf?.number === pr.number ? viewedOf.files : undefined;
-  const files: DiffFile[] = pr.files.map((f, i) => ({
+  const files: DiffFile[] = (since?.files ?? pr.files).map((f, i) => ({
     path: f.path,
     status: viewed?.get(f.path) ? "✓" : "",
     load: async (): Promise<[string, string]> => ["", ""],
-    show: () => showOneDiff(pr, f.path, threads, f.path === path ? at : undefined),
+    show: () => showOneDiff(pr, f.path, threads, f.path === path ? at : undefined, since?.oid),
     // GitHub's Viewed checkbox for the file; checking it moves on to the next file you haven't viewed.
     extra: viewed?.has(f.path)
       ? () => {
@@ -1554,15 +1695,20 @@ function showFileDiff(pr: Details, path: string, threads: Thread[], at?: { line:
   return showDiffs(files, label, Math.max(0, files.findIndex((f) => f.path === path)));
 }
 
-async function showOneDiff(pr: Details, path: string, threads: Thread[], at?: { line: number | null; side: "LEFT" | "RIGHT" }): Promise<boolean> {
+/**
+ * Draws one file's diff with its threads, from the merge base to the head, or from `from`, the commit you last
+ * reviewed. From there, the old side isn't the base's, so only threads on the new side show.
+ */
+async function showOneDiff(pr: Details, path: string, threads: Thread[], at?: { line: number | null; side: "LEFT" | "RIGHT" }, from?: string): Promise<boolean> {
   let diff: monaco.editor.IStandaloneDiffEditor;
   try {
     const slow = setTimeout(() => status(`Fetching #${pr.number}…`, "prs:progress"), 300);
     const [mergeBase] = await Promise.all([prepareDiff(pr).finally(() => (clearTimeout(slow), status("", "prs:progress"))), loadMarkdown(), me()]);
     const show = (spec: string) => git("show", spec).catch(() => "");
-    const [original, modified] = await Promise.all([show(`${mergeBase}:${path}`), show(`${pr.headRefOid}:${path}`)]);
+    const [original, modified] = await Promise.all([show(`${from ?? mergeBase}:${path}`), show(`${pr.headRefOid}:${path}`)]);
     const action = { label: "Comment on Line", title: "Comment on the selected lines, or reply to the comments on the cursor's line", run: () => commentAtCursor() };
-    diff = showDiff(path, original, modified, `#${pr.number}: ${pr.baseRefName} ↔ ${pr.headRefName}`, action);
+    diff = showDiff(path, original, modified, from ? `#${pr.number}: since your review (${from.slice(0, 7)})` : `#${pr.number}: ${pr.baseRefName} ↔ ${pr.headRefName}`, action);
+    if (from) threads = threads.filter((t) => t.side === "RIGHT");
   } catch (e) {
     showError(`Can't show the diff`, e);
     return false;
@@ -1766,6 +1912,7 @@ function commentForm() {
   const text = el("textarea");
   text.rows = 4;
   text.placeholder = f.reply ? `Reply to ${f.reply.user} (Markdown)` : `Comment on ${lines(f.start, f.line)}${f.side === "LEFT" ? " of the old version" : ""} (Markdown)`;
+  mentions(text);
   const buttons = el("div", "pr-actions");
   const close = () => ((form = undefined), drawZones());
   const button = (label: string, run: (body: string) => unknown, primary = false) => {
@@ -1835,6 +1982,49 @@ function commentForm() {
   box.append(text, buttons);
   requestAnimationFrame(() => text.focus());
   return box;
+}
+
+/** The files that changed since the commit you last reviewed, with their line counts. */
+type Since = { oid: string; files: { path: string; additions: number; deletions: number }[] };
+const sinceCache = new Map<string, Promise<Since>>();
+
+/** The commit of your latest submitted review, when the pull request's head has moved on since. */
+function lastReviewed(pr: Details): string | undefined {
+  const mine = pr.reviews.filter((r) => r.author.login === myLogin && r.state !== "PENDING" && r.commit?.oid).sort((a, b) => Date.parse(b.submittedAt) - Date.parse(a.submittedAt))[0];
+  return mine && mine.commit!.oid !== pr.headRefOid ? mine.commit!.oid : undefined;
+}
+
+/**
+ * What changed between the commit you last reviewed and the head, as GitHub's "changes since your last review". A
+ * force push can leave that commit out of the pull request's history, so it's fetched by ID when it isn't here.
+ */
+function sinceReview(pr: Details, oid: string): Promise<Since> {
+  const key = `${oid}..${pr.headRefOid}`;
+  if (!sinceCache.has(key)) {
+    const load = (async () => {
+      await prepareDiff(pr);
+      const here = await git("cat-file", "-e", `${oid}^{commit}`).then(() => true, () => false);
+      if (!here) {
+        const { code, output } = await gitOutput(["fetch", "--no-tags", "origin", oid]);
+        if (code) throw new Error(output);
+      }
+      const out = await git("diff", "--numstat", "--no-renames", oid, pr.headRefOid);
+      // Only files the pull request changes: when the author merged the base branch in since your review, the
+      // diff also holds everyone else's work on the base, which isn't the pull request's.
+      const own = new Set(pr.files.map((f) => f.path));
+      const files = out
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => {
+          const [a, d, ...path] = l.split("\t");
+          return { path: path.join("\t"), additions: Number(a) || 0, deletions: Number(d) || 0 };
+        })
+        .filter((f) => own.has(f.path));
+      return { oid, files };
+    })();
+    sinceCache.set(key, load.catch((e) => (sinceCache.delete(key), Promise.reject(e))));
+  }
+  return sinceCache.get(key)!;
 }
 
 /** Diff editors that have the comment gutter's listeners; the diff editor is made once and reused. */

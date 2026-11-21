@@ -317,7 +317,9 @@ folds into one line; click it to open it. Each check shows how long it ran, or
 has been running. While checks run, and for the first two minutes of a new pull request, before
 GitHub queues its checks, the tab checks them every 15 seconds and redraws when
 they finish or the merge state changes, so the checks, the status box, and the
-counts stay current; it waits while you type a comment.
+counts stay current; it waits while you type a comment. When the checks finish,
+the status bar says whether they passed, and if you're in another tab, a
+message with **Open #123** tells you too.
 
 Click a check to open its log, if it failed in GitHub Actions, or else its page
 in your browser. The log button on a failed job shows the log of its failed
@@ -340,6 +342,12 @@ diff's file list.
 
 Click a commit to see its own diff.
 
+After you've reviewed a pull request and its author pushed again, the Files
+tab offers **Since your review**, as GitHub's "changes since your last review":
+it lists only the files that changed after the commit you reviewed, and their
+diffs start from that commit. **All changes** goes back to the whole pull
+request.
+
 With more than five files, the Files tab groups them under their folders, and
 with more than eight it has a box that filters them by path. Press ↓ in the box
 to move to the list.
@@ -348,7 +356,11 @@ to move to the list.
 
 Descriptions and comments render as GitHub Markdown, and their links open in
 your browser. The comment box and the reply boxes in the conversation have
-**Write** and **Preview** tabs; **Preview** shows your text as GitHub will. `#123` links to that issue or pull request, and
+**Write** and **Preview** tabs; **Preview** shows your text as GitHub will.
+Type `@` in any comment box to pick a person: the pull request's participants
+come first, then everyone who can be assigned in the repository. ↑ and ↓
+choose, Enter or Tab inserts, and Escape closes the list. A comment you haven't
+sent stays in the box when you close the tab or restart Tusk. `#123` links to that issue or pull request, and
 `@name` to that person's profile.
 
 Line comments appear in the conversation under the file and lines they're on,

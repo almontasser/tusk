@@ -836,6 +836,9 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .pr-composer textarea { display: block; width: 100%; box-sizing: border-box; min-height: 64px; max-height: 40vh; resize: vertical; padding: 8px 10px; font: var(--ui); border-radius: 8px; }
 .pr-composer .pr-actions { justify-content: flex-end; align-items: center; margin-top: 8px; }
 .pr-hint { margin-right: auto; font-size: 12px; }
+.pr-mentions { position: fixed; z-index: 1000; min-width: 180px; margin: 0; padding: 4px; list-style: none; border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
+.pr-mentions li { padding: 3px 10px; border-radius: 5px; }
+.pr-mentions li.selected { background: var(--selected); }
 .pr-writer-tabs { display: flex; gap: 2px; margin-bottom: 4px; }
 .pr-writer-tabs button { height: 22px; padding: 0 10px; border-radius: var(--radius); font-size: 12px; color: var(--muted); }
 .pr-writer-tabs button[aria-pressed="true"] { background: var(--hover); color: var(--text); }
@@ -849,6 +852,10 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .pr-pending .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Rows: commits, checks, and files */
+.pr-scope { display: inline-flex; margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.pr-scope button { height: 24px; padding: 0 10px; font-size: 12px; color: var(--muted); border-radius: 0; }
+.pr-scope button + button { border-left: 1px solid var(--border); }
+.pr-scope button[aria-pressed="true"] { background: var(--selected); color: var(--text); }
 .pr-section-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 8px; color: var(--muted); }
 .pr-section-bar progress { width: 120px; height: 6px; }
 .pr-section-bar button.link { margin-left: auto; }

@@ -3977,6 +3977,21 @@ a view zone with a fixed height, which a preview would overflow.
 The list's review queue needs `reviewRequests` on each row, which the open
 list asks for; the closed lists leave it out with `statusCheckRollup`.
 
+**Since your review** takes the commit of your latest submitted review
+(`reviews[].commit.oid`), fetches it by ID if a force push left it out, and
+lists `git diff --numstat` from it to the head, keeping only paths in the pull
+request's own files, since a merge of the base branch since then would bring in
+everyone else's changes. `showOneDiff` takes the commit as the old side, and
+draws only new-side threads there.
+
+`mentions` adds the `@` list to a text box. It listens on the box in the
+capture phase, so its Enter and arrows win over the box's own ⌘⏎ and Escape.
+Unsent comments in the tab's comment box are kept in `localStorage`
+(`pr-drafts:<project>`), saved 300 ms after you stop typing.
+
+`watchPullRequest` keeps watching while the tab is hidden, so it can say when
+checks finish; only an open edit or a focused comment box holds its redraw.
+
 #### Fields, checks, and the status box
 
 There are three field lists: `FIELDS` for the status bar's lookup, `LIST_FIELDS`
