@@ -3287,3 +3287,9 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .pr-create-file .letter { width: 12px; font: 600 11px var(--mono); text-align: center; }
 .pr-create .added { color: var(--green); font-variant-numeric: tabular-nums; }
 .pr-create .deleted { color: var(--red); font-variant-numeric: tabular-nums; }
+
+/* Pull requests: merging */
+.pr-merge-dialog { width: min(640px, calc(100vw - 32px)); }
+.pr-merge-dialog label.field textarea { font: 12.5px var(--mono); resize: vertical; min-height: 120px; }
+.pr-rerequest { margin-left: 2px; font-size: 12px; opacity: 0.6; }
+.pr-rerequest:hover, .pr-rerequest:focus-visible { opacity: 1; }

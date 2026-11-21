@@ -3795,6 +3795,7 @@ modules above it in this list, so there are no import cycles:
 | `prshared.ts` | The types (`PullRequest`, `Details`, `Thread`, `Host`), the field lists, `host`, `gh`, `markdown`, the small DOM helpers (`el`, `icon`, `avatar`, `when`, `ltr`, labels), `me()` and `myLogin`, the open tabs (`pages`), and `hub` |
 | `prthreads.ts` | Line threads (`lineComments`), editing and deleting your own comments (`commentBlock`, `Target`), and the comment box (`writer`, `mentions`) |
 | `prdata.ts` | Data code with no DOM or Tauri, which `prdata.test.ts` tests: `latestLoads` |
+| `prmergedata.ts` | Merging's data code with no DOM or Tauri, which `prmergedata.test.ts` tests: `MergeInfo`, `mergeActions`, `mergeMessage`, `revertMessage` |
 | `prreview.ts` | Your pending review: loading it, adding and deleting its comments, and submitting it |
 | `prlist.ts` | The sidebar list, its review queue sections, the new-activity marks, and `problemItem` |
 | `prchecks.ts` | The Checks section (`drawChecks`), failed job logs, and links to project files in them |
@@ -4178,6 +4179,42 @@ numstat parser.
   decide whether the commits or a template may still fill them.
 - **Description box.** `writer` and `mentions` from `prthreads.ts` get number
   0, which has no page, so `@` suggests only the repository's people.
+
+#### Merging
+
+`gh pr view --json` has no merge queue, admin, or head ref fields, so
+`mergeInfo` in `practions.ts` runs one GraphQL query by the pull request's `id`
+(`isMergeQueueEnabled`, `isInMergeQueue`, `mergeQueueEntry`,
+`viewerCanMergeAsAdmin`, `viewerCanEnableAutoMerge`, `headRef`,
+`isCrossRepository`, `viewerCanDeleteHeadRef`, `baseRepository.viewerPermission`,
+and `viewerMergeHeadlineText` and `viewerMergeBodyText` per method). It caches
+the promise in a `WeakMap` keyed by the loaded `Details`, so the status box and
+**Merge…** share one query per load, and a redraw queries again. When the query
+fails, it returns null and merging works as before: no queue, admin, or branch
+actions. The status box draws without waiting and appends the query's lines
+(queue, revert, branch) when it resolves, so `renderPullRequest` and
+`DETAIL_FIELDS` stay unchanged.
+
+`mergeActions` in `prmergedata.ts` decides what to offer. GitHub returns
+`viewerCanMergeAsAdmin` true for people who can only read, so the admin bypass
+also needs `ADMIN` permission and a `BLOCKED` merge state or a merge queue.
+Branch actions skip forks, and Delete needs `headRef.target.oid` to equal the
+pull request's `headRefOid`, so it never deletes commits the pull request
+doesn't have. **Resolve Conflicts…** skips the checkout only when the current
+branch has the same name and contains `headRefOid`. `watchPullRequest` keeps
+polling while auto-merge is on and includes `state` in what it compares, so the
+page redraws when GitHub merges. `mergeMessage` uses GitHub's `viewerMerge*Text`, which follows the
+repository's squash and merge message settings, and falls back to GitHub's
+defaults.
+
+The commands: `gh pr merge` with `--subject`, `--body`, `--auto`, `--admin`,
+or `--delete-branch`; `gh pr merge` with no method to queue, since gh queues
+when the base requires it; the `dequeuePullRequest` and `revertPullRequest`
+mutations, which gh has no command for; and REST `DELETE git/refs/heads/NAME`
+and `POST git/refs` for the branch. **Resolve Conflicts…** runs `gh pr
+checkout`, then `git fetch` and `git merge --no-edit` through `gitTask`, which
+reports conflicts, and opens `openMerge` on the first conflicted file. The
+commit and push stay with the Commit tab.
 
 ## Filament intelligence (milestone 6)
 

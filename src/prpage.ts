@@ -14,7 +14,8 @@ import { deletePending, loadPending, pendingReview, submitReview } from "./prrev
 import { loadPullRequests, markOpenRows, markSeen, problemItem } from "./prlist";
 import { drawChecks } from "./prchecks";
 import { drawZones, lastReviewed, nextUnresolved, prepareDiff, replyTo, setResolved, setViewed, showFileDiff, shown, type Since, sinceReview, viewedFiles } from "./prdiff";
-import { editAssignees, editLabels, merge, more, requestReview, updateBranch } from "./practions";
+import { deleteBranch, dequeue, editAssignees, editLabels, merge, mergeInfo, more, reRequestReview, requestReview, resolveConflicts, restoreBranch, revert, updateBranch } from "./practions";
+import { type MergeInfo, mergeActions, queueStates } from "./prmergedata";
 import { branchThreads, decorateComments, updateBranchPullRequest } from "./preditor";
 
 // ---- Details ----
@@ -119,7 +120,12 @@ export async function renderPullRequest(number: number) {
     reload();
   };
   // gh fetches and checks out with git, which asks for a password or passphrase in the dialog through gitTask.
-  const checkOut = () => gitTask(`Checking out #${number}…`, ["pr", "checkout", String(number)], `Can't check out #${number}`, { gh: true }).then((o) => o !== undefined && status(`Checked out #${number}.`, "app", "info"));
+  const checkOut = () =>
+    gitTask(`Checking out #${number}…`, ["pr", "checkout", String(number)], `Can't check out #${number}`, { gh: true }).then((o) => {
+      if (o === undefined) return false;
+      status(`Checked out #${number}.`, "app", "info");
+      return true;
+    });
   const repo = repoUrl(pr);
 
   // ---- Header: title, state, branches, and actions ----
@@ -577,7 +583,7 @@ export async function renderPullRequest(number: number) {
     block.append(heading, content);
     side.append(block);
   };
-  sideBlock("Reviewers", reviewerList(pr, repo), open ? () => requestReview(pr, run) : undefined);
+  sideBlock("Reviewers", reviewerList(pr, repo, open ? (login) => reRequestReview(pr, login, run) : undefined), open ? () => requestReview(pr, run) : undefined);
   sideBlock("Assignees", peopleList(pr.assignees.map((a) => a.login), repo, "No one"), () => editAssignees(pr, run));
   sideBlock("Labels", pr.labels.length ? labelRow(pr.labels) : el("div", "muted", "None yet"), () => editLabels(pr, run));
   // Issues the pull request closes when it merges, from "Fixes #12" in its description or a link on GitHub.
@@ -651,10 +657,11 @@ function diffBar(added: number, removed: number) {
  * What stands between the pull request and merging, as GitHub's merge box shows it: checks, reviews, and
  * mergeability, each with the button that deals with it.
  */
-function statusCard(pr: Details, run: (progress: string, args: string[], done: string, error: string) => unknown, checkOut: () => unknown, show: (s: Section) => void) {
+function statusCard(pr: Details, run: (progress: string, args: string[], done: string, error: string) => unknown, checkOut: () => Promise<boolean>, show: (s: Section) => void) {
   const card = el("section", "pr-status");
   const n = String(pr.number);
-  const line = (kind: "good" | "warn" | "bad" | "info", iconName: string, text: string, detail = "", button?: [string, () => unknown]) => {
+  /** A line of the box, with a button: its label, its action, and an optional tooltip. */
+  const line = (kind: "good" | "warn" | "bad" | "info", iconName: string, text: string, detail = "", button?: [string, () => unknown, string?]) => {
     const row = el("div", `pr-status-line ${kind}`);
     const words = el("div", "pr-status-text");
     words.append(el("strong", "", text));
@@ -663,13 +670,24 @@ function statusCard(pr: Details, run: (progress: string, args: string[], done: s
     if (button) {
       const b = el("button", "", button[0]);
       b.onclick = button[1];
+      if (button[2]) b.title = button[2];
       // A short line keeps its button beside it; one with a detail puts it under the text.
       (detail ? words : row).append(b);
     }
     card.append(row);
   };
-  if (pr.state === "MERGED") return line("info", "git-merge", `Merged into ${pr.baseRefName}`), card;
-  if (pr.state === "CLOSED") return line("bad", "git-pull-request-closed", "Closed without merging", "", ["Reopen", () => run(`Reopening #${n}…`, ["pr", "reopen", n], `Reopened #${n}`, `Can't reopen #${n}`)]), card;
+  // What the GraphQL query adds (the merge queue, and the branch and revert after merging) arrives after the rest,
+  // so it goes at the end of the box. When the query fails, the box stays as it is.
+  const extra = (draw: (info: MergeInfo) => void) => void mergeInfo(pr).then((info) => info && draw(info));
+  const ended = (merged: boolean) =>
+    extra((info) => {
+      const can = mergeActions(pr, info);
+      if (can.revert) line("info", "discard", "Undo these changes", `A new pull request can revert #${n} in ${pr.baseRefName}.`, ["Revert…", () => revert(pr), `Create a pull request that reverts #${n}`]);
+      if (can.deleteBranch) line("info", "git-branch", `${pr.headRefName} is still on GitHub`, merged ? "It's merged, so you can delete it." : "", ["Delete Branch…", () => deleteBranch(pr), `Delete ${pr.headRefName} on GitHub`]);
+      else if (can.restoreBranch) line("info", "git-branch", `${pr.headRefName} was deleted`, "", ["Restore Branch…", () => restoreBranch(pr), `Recreate ${pr.headRefName} on GitHub at the pull request's last commit`]);
+    });
+  if (pr.state === "MERGED") return line("info", "git-merge", `Merged into ${pr.baseRefName}`), ended(true), card;
+  if (pr.state === "CLOSED") return line("bad", "git-pull-request-closed", "Closed without merging", "", ["Reopen", () => run(`Reopening #${n}…`, ["pr", "reopen", n], `Reopened #${n}`, `Can't reopen #${n}`)]), ended(false), card;
   const checks = pr.statusCheckRollup ?? [];
   const count = (s: string) => checks.filter((c) => checkState(c) === s).length;
   const summary = checksSummary(checks);
@@ -681,12 +699,25 @@ function statusCard(pr: Details, run: (progress: string, args: string[], done: s
   else if (pr.reviewDecision === "CHANGES_REQUESTED") line("bad", "request-changes", "Changes requested");
   else if (pr.reviewDecision === "REVIEW_REQUIRED") line("warn", "eye", "Review required", "An approving review is needed to merge.");
   if (pr.isDraft) line("info", "git-pull-request-draft", "Draft", "Reviewers aren't asked yet, and it can't be merged.", ["Ready for Review", () => run(`Marking #${n} ready…`, ["pr", "ready", n], `Marked #${n} ready for review`, `Can't mark #${n} ready`)]);
-  else if (pr.mergeable === "CONFLICTING") line("bad", "warning", `Conflicts with ${pr.baseRefName}`, `Check out the branch and merge ${pr.baseRefName} into it to resolve them.`, ["Check Out", checkOut]);
+  else if (pr.mergeable === "CONFLICTING")
+    line("bad", "warning", `Conflicts with ${pr.baseRefName}`, `Merge ${pr.baseRefName} into the branch here, resolve the conflicts, then commit and push.`, [
+      "Resolve Conflicts…",
+      () => resolveConflicts(pr, checkOut),
+      `Check out #${n} and merge ${pr.baseRefName} into it, then open the merge tool`,
+    ]);
   else if (pr.mergeStateStatus === "BEHIND") line("warn", "arrow-down", `Behind ${pr.baseRefName}`, "The base branch has commits this branch doesn't.", ["Update Branch", () => updateBranch(pr, run)]);
-  else if (pr.autoMergeRequest) line("good", "clock", "Auto-merge is on", `It merges (${pr.autoMergeRequest.mergeMethod.toLowerCase()}) once checks and reviews pass.`, ["Turn Off", () => run(`Turning off auto-merge…`, ["pr", "merge", n, "--disable-auto"], `Turned off auto-merge for #${n}`, "Can't turn off auto-merge")]);
   else if (pr.mergeStateStatus === "CLEAN" || pr.mergeStateStatus === "UNSTABLE" || pr.mergeStateStatus === "HAS_HOOKS") line("good", "check", "Ready to merge", pr.mergeStateStatus !== "UNSTABLE" ? "" : summary === "pending" ? "Checks that aren't required are still running." : "Checks that aren't required are failing.");
   else if (pr.mergeStateStatus === "BLOCKED") line("warn", "lock", "Merging is blocked", "A required review, check, or rule isn't met yet.");
   else line("info", "loading codicon-modifier-spin", "Checking whether it can merge…", "Refresh in a moment.");
+  // Its own line, so it shows (and you can turn it off) while conflicts or a branch that's behind hold the merge up.
+  if (pr.autoMergeRequest) line("good", "clock", "Auto-merge is on", `It merges (${pr.autoMergeRequest.mergeMethod.toLowerCase()}) once checks and reviews pass.`, ["Turn Off", () => run(`Turning off auto-merge…`, ["pr", "merge", n, "--disable-auto"], `Turned off auto-merge for #${n}`, "Can't turn off auto-merge")]);
+  extra((info) => {
+    if (!info.isInMergeQueue) return;
+    // GitHub counts positions from 1: a queue's only entry is at position 1.
+    const entry = info.mergeQueueEntry;
+    const detail = entry ? `Position ${entry.position} in the queue. ${queueStates[entry.state] ?? entry.state}.` : "";
+    line("good", "list-ordered", `Queued to merge into ${pr.baseRefName}`, detail, ["Remove…", () => dequeue(pr), "Remove from the merge queue"]);
+  });
   return card;
 }
 
@@ -703,7 +734,7 @@ function peopleList(logins: string[], repo: string, none: string) {
 }
 
 /** Who reviewed and how, and who's still asked to. */
-function reviewerList(pr: Details, repo: string) {
+function reviewerList(pr: Details, repo: string, reRequest?: (login: string) => unknown) {
   const list = el("ul", "pr-reviewer-list");
   const marks: Record<string, [string, string, string]> = {
     APPROVED: ["pass-filled", "checks-passed", "Approved"],
@@ -717,8 +748,19 @@ function reviewerList(pr: Details, repo: string) {
     state.title = mark[2];
     li.append(avatar(login, repo), el("span", "pr-row-main", login), state);
     list.append(li);
+    return li;
   };
-  for (const r of pr.latestReviews) person(r.author.login, marks[r.state] ?? ["circle-outline", "muted", r.state]);
+  const asked = new Set(pr.reviewRequests.map((r) => r.login));
+  for (const r of pr.latestReviews) {
+    const li = person(r.author.login, marks[r.state] ?? ["circle-outline", "muted", r.state]);
+    // As GitHub does, for someone who reviewed and isn't asked again yet.
+    if (!reRequest || asked.has(r.author.login) || r.author.login === pr.author.login) continue;
+    const b = el("button", "icon-button codicon codicon-sync pr-rerequest");
+    b.title = `Re-request a review from ${r.author.login}`;
+    b.setAttribute("aria-label", b.title);
+    b.onclick = () => reRequest(r.author.login);
+    li.append(b);
+  }
   for (const r of pr.reviewRequests) person(r.login ?? r.name ?? r.slug ?? "", ["circle-filled", "checks-pending", "Review requested"]);
   if (!list.childElementCount) return el("div", "muted", "No reviews yet");
   return list;
@@ -731,12 +773,13 @@ function reviewerList(pr: Details, repo: string) {
  * the next tick. It stops once the tab closes or shows a newer version of the pull request.
  */
 function watchPullRequest(pr: Details, entry: Page) {
-  const settling = checksSummary(pr.statusCheckRollup) === "pending" || pr.mergeStateStatus === "UNKNOWN" || Date.now() - Date.parse(pr.createdAt) < 120_000;
+  // With auto-merge on, it also watches for GitHub to merge, so the box doesn't keep saying auto-merge is on.
+  const settling = checksSummary(pr.statusCheckRollup) === "pending" || pr.mergeStateStatus === "UNKNOWN" || Date.now() - Date.parse(pr.createdAt) < 120_000 || !!pr.autoMergeRequest;
   if (!settling || pr.state !== "OPEN") return;
   const page = entry.el;
   const drawn = page.firstElementChild;
   const current = () => pages.get(pr.number) === entry && page.firstElementChild === drawn;
-  const key = (p: Pick<Details, "statusCheckRollup" | "mergeStateStatus">) => JSON.stringify([p.mergeStateStatus, (p.statusCheckRollup ?? []).map(checkState)]);
+  const key = (p: Pick<Details, "statusCheckRollup" | "mergeStateStatus" | "state">) => JSON.stringify([p.state, p.mergeStateStatus, (p.statusCheckRollup ?? []).map(checkState)]);
   const before = key(pr);
   setTimeout(async function tick() {
     if (!current()) return;
@@ -745,7 +788,7 @@ function watchPullRequest(pr: Details, entry: Page) {
     const busy = !!page.querySelector(".pr-comment-form") || (page.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement);
     if (!busy) {
       try {
-        const now = JSON.parse(await gh("pr", "view", String(pr.number), "--json", "statusCheckRollup,mergeStateStatus"));
+        const now = JSON.parse(await gh("pr", "view", String(pr.number), "--json", "statusCheckRollup,mergeStateStatus,state"));
         if (!current()) return;
         if (key(now) !== before) {
           const result = checksSummary(now.statusCheckRollup);
@@ -763,7 +806,7 @@ function watchPullRequest(pr: Details, entry: Page) {
           return renderPullRequest(pr.number);
         }
         // Nothing changed, and nothing is left to wait for.
-        if (checksSummary(now.statusCheckRollup) !== "pending" && now.mergeStateStatus !== "UNKNOWN" && Date.now() - Date.parse(pr.createdAt) >= 120_000) return;
+        if (checksSummary(now.statusCheckRollup) !== "pending" && now.mergeStateStatus !== "UNKNOWN" && Date.now() - Date.parse(pr.createdAt) >= 120_000 && !pr.autoMergeRequest) return;
       } catch {
         // Tried again on the next tick.
       }
