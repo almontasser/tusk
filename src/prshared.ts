@@ -51,8 +51,8 @@ export type Host = {
   openAt(path: string, line: number): unknown;
   /** Replaces lines of a file in its editor, if they still read `expected`. False when they don't. */
   replaceLines(path: string, start: number, end: number, expected: string, text: string): Promise<boolean>;
-  /** Saves a file's editor tab, if it has unsaved changes. */
-  save(path: string): Promise<unknown>;
+  /** Saves a file's editor tab, if it has unsaved changes. False when it still has some, such as after Cancel. */
+  save(path: string): Promise<boolean>;
 };
 
 export const $ = (id: string) => document.getElementById(id)!;

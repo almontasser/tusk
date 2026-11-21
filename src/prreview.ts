@@ -65,11 +65,17 @@ export async function addPending(pr: Details, place: Place, body: string) {
       "-f", "query=mutation($pr: ID!, $commit: GitObjectID!) { addPullRequestReview(input: { pullRequestId: $pr, commitOID: $commit }) { pullRequestReview { id } } }",
       "-f", `pr=${pr.id}`, "-f", `commit=${pr.headRefOid}`, "--jq", ".data.addPullRequestReview.pullRequestReview.id",
     )).trim();
-    await gh(
-      "api", "graphql",
-      "-f", "query=mutation($review: ID!, $path: String!, $body: String!) { addPullRequestReviewThread(input: { pullRequestReviewId: $review, path: $path, body: $body, subjectType: FILE }) { thread { id } } }",
-      "-f", `review=${reviewId}`, "-f", `path=${place.path}`, "-f", `body=${body}`,
-    );
+    try {
+      await gh(
+        "api", "graphql",
+        "-f", "query=mutation($review: ID!, $path: String!, $body: String!) { addPullRequestReviewThread(input: { pullRequestReviewId: $review, path: $path, body: $body, subjectType: FILE }) { thread { id } } }",
+        "-f", `review=${reviewId}`, "-f", `path=${place.path}`, "-f", `body=${body}`,
+      );
+    } catch (e) {
+      // An empty review started just now would hide Comment Now from then on, so it goes too.
+      if (!review) await gh("api", "graphql", "-f", "query=mutation($id: ID!) { deletePullRequestReview(input: { pullRequestReviewId: $id }) { clientMutationId } }", "-f", `id=${reviewId}`).catch(() => {});
+      throw e;
+    }
   } else if (!review) {
     const comment = { path: place.path, line: place.line, side: place.side, body, ...(place.start_line ? { start_line: place.start_line, start_side: place.side } : {}) };
     await invoke<string>("run_capture", {

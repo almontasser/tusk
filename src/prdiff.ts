@@ -110,7 +110,8 @@ export function showFileDiff(pr: Details, path: string, threads: Thread[], at?: 
     extra: () => {
       const comment = el("button", "", "Comment on File");
       comment.title = "Comment on the whole file rather than on its lines";
-      comment.onclick = () => ((form = { side: "RIGHT", line: 0, start: 0, file: true }), drawZones());
+      // The form opens above the first line, so the diff scrolls up to it.
+      comment.onclick = () => ((form = { side: "RIGHT", line: 0, start: 0, file: true }), drawZones(), shown?.diff.getModifiedEditor().setScrollTop(0));
       const extras = el("span", "pr-diff-extras");
       extras.append(comment);
       if (viewed?.has(f.path)) extras.append(viewedBox(f, i));
@@ -255,7 +256,8 @@ async function applySuggestions(pr: Details, items: Suggested[]) {
   const files = [...applied];
   host.status(`Applied ${count} to ${plural(files.length, "file")}. Review the changes.`);
   if (!(await confirm(`Save ${plural(files.length, "file")} and commit all their changes as "Apply suggestions from code review"? Nothing is pushed.`, "Save and Commit"))) return;
-  for (const path of files) await host.save(`${host.root()}/${path}`);
+  for (const path of files)
+    if (!(await host.save(`${host.root()}/${path}`))) return showError(`${path} wasn't saved, so nothing was committed.`);
   // Only these files: anything else you staged stays out of the commit.
   const args = ["--literal-pathspecs", "commit", "-m", "Apply suggestions from code review", "--", ...files];
   const result = await withProgress("Committing the suggestions…", (signal) => gitOutput(args, signal), { cancellable: true, error: "Commit failed" });
@@ -379,7 +381,14 @@ function suggestionActions(pr: Details, item: Suggested) {
   const box = el("input");
   box.type = "checkbox";
   box.checked = picked.items.has(item.id);
-  box.onchange = () => (box.checked ? picked.items.set(item.id, item) : picked.items.delete(item.id), drawZones());
+  box.dataset.suggestion = String(item.id);
+  // The redraw updates every count; focus comes back to this box for the keyboard.
+  box.onchange = () => {
+    if (box.checked) picked.items.set(item.id, item);
+    else picked.items.delete(item.id);
+    drawZones();
+    document.querySelector<HTMLInputElement>(`input[data-suggestion="${item.id}"]`)?.focus();
+  };
   const select = el("label", "pr-suggestion-pick");
   select.title = "Select the suggestion to apply it together with others";
   select.append(box, " Select");
@@ -401,7 +410,13 @@ function commentForm() {
   const text = el("textarea");
   text.rows = 4;
   text.value = f.text ?? "";
-  text.addEventListener("input", () => (f.text = text.value));
+  // The box grows with its text, up to a point, and its zone grows with it.
+  const grow = () => {
+    text.style.height = "";
+    if (text.scrollHeight > text.clientHeight) text.style.height = `${Math.min(text.scrollHeight + 2, 400)}px`;
+  };
+  text.addEventListener("input", () => ((f.text = text.value), grow()));
+  requestAnimationFrame(grow);
   text.placeholder = f.reply ? `Reply to ${f.reply.user} (Markdown)` : f.file ? `Comment on ${path} (Markdown)` : `Comment on ${lines(f.start, f.line)}${f.side === "LEFT" ? " of the old version" : ""} (Markdown)`;
   text.setAttribute("aria-label", f.reply ? "Reply" : "Comment");
   const buttons = el("div", "pr-actions");
