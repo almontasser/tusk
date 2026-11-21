@@ -3259,3 +3259,10 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .remote-note-actions { display: flex; gap: 12px; }
 .remote-empty { padding: 16px 14px; color: var(--muted); display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .remote-empty p { margin: 0; }
+
+/* Pull requests: checks */
+.pr-check.optional > .pr-row-main, .pr-check.optional > .checks-failed { opacity: 0.6; }
+.pr-check-required { font-size: 11px; padding: 0 6px; border: 1px solid var(--border); border-radius: 10px; color: var(--muted); white-space: nowrap; }
+.pr-rows li.pr-annotation { min-height: 26px; padding-left: 34px; font-size: 12px; cursor: pointer; }
+.pr-checks .pr-check-group ~ .pr-annotation { padding-left: 56px; }
+.pr-annotation-path { font: 12px var(--mono); color: var(--accent); white-space: nowrap; }

@@ -3797,8 +3797,8 @@ modules above it in this list, so there are no import cycles:
 | `prdata.ts` | Data code with no DOM or Tauri, which `prdata.test.ts` tests: `latestLoads` |
 | `prreview.ts` | Your pending review: loading it, adding and deleting its comments, and submitting it |
 | `prlist.ts` | The sidebar list, its review queue sections, the new-activity marks, and `problemItem` |
-| `prchecks.ts` | The Checks section (`drawChecks`), failed job logs, and links to project files in them |
 | `prdiff.ts` | A file's diff: threads as view zones, the comment form, the gutter **+**, pending comments, suggestions, Viewed, and **Since your review** |
+| `prchecks.ts` | The Checks section (`drawChecks`), job logs and live steps, run controls, required checks, annotations as markers (`branchAnnotations`), deployments, and artifacts |
 | `practions.ts` | Merging, the More Actions menu, Update Branch, and editing the title, reviewers, assignees, and labels |
 | `preditor.ts` | The current branch's pull request in the status bar, and its threads in the editor (`decorateComments`, `openThread`) |
 | `prpage.ts` | The pull request's editor tab: header, sections, status box, side column, the live refresh (`watchPullRequest`), and `threadsChanged` |
@@ -4097,6 +4097,37 @@ next buttons move through the pull request's files.
 version with the lines in your file, through the host's `replaceLines`, and
 replaces them in the editor as one undoable edit only when they match and the
 pull request's branch is checked out.
+
+#### Checks
+
+`statusCheckRollup` has no required flags, annotations, or deployments, so
+`prchecks.ts` reads them in one GraphQL query on the pull request's last commit:
+`isRequired(pullRequestNumber:)` and the first 50 `annotations` of each check
+run, `isRequired` of each status context, and the latest `deployments` per
+environment. The result is cached by pull request and check states
+(`checkKey`, `checkState`), so the 15-second poll's redraws reuse it and a check
+that finishes looks again. Check runs are matched by name and details URL,
+because two workflows can have jobs with the same name. The query reads the
+first 100 checks; more show without the extras.
+
+Annotations become Monaco markers with the owner `ci`. `branchAnnotations`
+runs from `updateBranchPullRequest`, so the checked-out branch's files show
+them, and new models get them in `onDidCreateModel`. The pull request diff's new
+side gets them too: `showOneDiff` sets `shown` right after it creates the
+model, so a microtask reads it. `resolvePath` maps a CI path to a project file
+by trying each tail from `pathTails` with `path_exists`, which handles
+`/home/runner/work/app/app/`. Annotations on `.github` are about the workflow,
+not a file, so they list under the check without a marker or link.
+
+GitHub has no log for a running job (`gh run view --log` refuses and the REST
+logs endpoint returns 404), so **View Steps** polls `actions/jobs/ID` every 5
+seconds and formats the steps with `jobSteps`. The job number in a check's
+details URL is the job's `databaseId`, which `gh run rerun --job` and the REST
+job endpoint take. Runs that wait for a maintainer's approval have no checks,
+so `gh run list --commit SHA --status action_required` finds them, and
+**Approve** posts to `actions/runs/ID/approve`. `gh run download -n` extracts a
+single artifact straight into its folder, so each download gets a folder named
+for the artifact.
 
 ## Filament intelligence (milestone 6)
 

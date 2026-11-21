@@ -325,12 +325,59 @@ counts stay current; it waits while you type a comment. When the checks finish,
 the status bar says whether they passed, and if you're in another tab, a
 message with **Open #123** tells you too.
 
+Checks that the base branch requires for merging say **Required** and come
+first in their state. A failing check that isn't required reads dimmer, since
+it doesn't block the merge, and the bar counts how many failures are required.
+
 Click a check to open its log, if it failed in GitHub Actions, or else its page
 in your browser. The log button on a failed job shows the log of its failed
 steps in the editor, without the timestamps, scrolled to the first error, such
 as PHPUnit's `There were 2 failures`. File paths in the log that exist in the
 project, such as `tests/Feature/OrderTest.php:42`, are links: click one to open
-the file at that line. **Re-run Failed** in the bar runs the failed jobs again.
+the file at that line.
+
+#### Annotations
+
+Tools such as PHPStan, Pint, and PHPUnit report problems on lines of files as
+check annotations. Each check lists its annotations under it: click one to
+open the file at its line. Annotations show as errors and warnings in two more
+places:
+
+- In the editor, when the pull request's branch is checked out, in its files
+  and the **Problems** panel. The lines are the pull request's, so edits you
+  haven't pushed can put them a few lines off.
+- In the pull request's diff, on the new side.
+
+Paths from CI, such as `/home/runner/work/app/app/src/Order.php`, map to the
+project's files. The first 50 annotations of each check show; a row links to
+the rest on GitHub.
+
+#### Running jobs
+
+GitHub has no log for a job until it ends. The steps button on a running job
+shows its steps, each with its state and how long it ran, and updates them
+every 5 seconds. If the job fails, the log of its failed steps replaces them.
+
+#### Run controls
+
+- **Re-run Failed** in the bar runs the failed jobs again.
+- The re-run button on a finished job runs it again, with the jobs it needs.
+- **Cancel Run** stops a running workflow run. With more than one running, you
+  pick which.
+- **Approve Runs** appears when a first-time contributor's workflow runs wait
+  for a maintainer. Review the changes to workflows and scripts first, since
+  the runs can use the repository's secrets.
+- **Artifacts…** lists the files the workflow runs uploaded. Pick one and a
+  folder, and it downloads into a folder named for it, which then opens in
+  your file manager.
+
+Each of these, except **Re-run Failed** and **Artifacts…**, asks you to confirm
+first.
+
+#### Deployments
+
+Deployments of the pull request's head follow the checks: the latest one to
+each environment, with its state. Click one to open the deployed site.
 
 ### Files and commits
 

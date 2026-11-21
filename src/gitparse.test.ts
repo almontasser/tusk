@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { actionsJob, checkDuration, cleanLog, sortChecks, suggestion, askpassKind, age, alignmentGaps, graphRows, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseRefs, parseStashList, resolveSimple, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
+import { actionsJob, checkDuration, checkKey, cleanLog, deploymentState, jobSteps, pathTails, sortChecks, suggestion, askpassKind, age, alignmentGaps, graphRows, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseRefs, parseStashList, resolveSimple, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -296,6 +296,40 @@ test("orders checks failed first and finds Actions jobs", () => {
   assert.deepEqual(sortChecks(checks).map((c) => c.name), ["a", "c", "b"]);
   assert.deepEqual(actionsJob("https://github.com/o/r/actions/runs/12/job/34"), { run: "12", job: "34" });
   assert.equal(actionsJob("https://ci.example.com/build/1"), null);
+});
+
+test("puts required checks first in each state", () => {
+  const failed = { status: "COMPLETED", conclusion: "FAILURE" };
+  const checks = [{ name: "a", ...failed }, { name: "z", ...failed, isRequired: true }, { name: "b", conclusion: "SUCCESS", status: "COMPLETED", isRequired: true }, { name: "m", ...failed, isRequired: true }];
+  assert.deepEqual(sortChecks(checks).map((c) => c.name), ["m", "z", "a", "b"]);
+});
+
+test("names checks across lookups", () => {
+  assert.equal(checkKey({ context: "ci/circleci" }), "ci/circleci");
+  assert.equal(checkKey({ name: "build", detailsUrl: "https://x/1", context: null }), "build https://x/1");
+  assert.notEqual(checkKey({ name: "build", detailsUrl: "https://x/1" }), checkKey({ name: "build", detailsUrl: "https://x/2" }));
+});
+
+test("lists the project paths a CI path can be", () => {
+  assert.deepEqual(pathTails("/home/runner/work/app/app/src/A.php"), ["home/runner/work/app/app/src/A.php", "runner/work/app/app/src/A.php", "work/app/app/src/A.php", "app/app/src/A.php", "app/src/A.php", "src/A.php", "A.php"]);
+  assert.deepEqual(pathTails("D:\\a\\app\\app\\src\\A.php").slice(-2), ["src/A.php", "A.php"]);
+  assert.deepEqual(pathTails("src/A.php"), ["src/A.php", "A.php"]);
+});
+
+test("formats a running job's steps", () => {
+  const t = (m: number) => new Date(Date.UTC(2026, 0, 1, 0, m)).toISOString();
+  const steps = [
+    { name: "Set up job", number: 1, status: "completed", conclusion: "success", started_at: t(0), completed_at: t(1) },
+    { name: "Lint", number: 2, status: "completed", conclusion: "skipped", started_at: null, completed_at: null },
+    { name: "Run tests", number: 3, status: "in_progress", conclusion: null, started_at: t(1), completed_at: null },
+    { name: "Upload", number: 4, status: "queued", conclusion: null, started_at: null, completed_at: null },
+  ];
+  assert.equal(jobSteps(steps, Date.parse(t(3))), "✓ Set up job  1m 0s\n– Lint\n● Run tests  running 2m 0s\n○ Upload  (waiting)");
+  assert.equal(jobSteps([{ ...steps[0], conclusion: "failure" }], 0), "✗ Set up job  1m 0s");
+});
+
+test("maps deployment states to check states", () => {
+  assert.deepEqual(["SUCCESS", "ERROR", "FAILURE", "INACTIVE", "IN_PROGRESS", undefined].map(deploymentState), ["passed", "failed", "failed", "skipped", "pending", "pending"]);
 });
 
 test("cleans failed step logs", () => {
