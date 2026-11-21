@@ -136,7 +136,9 @@ export async function loadPullRequests() {
   const key = `${host.root()}\0${filter}\0${text}`;
   if ($("pr-list").dataset.key !== key) ($("pr-list").dataset.key = key), (limit = 50), $("pr-list").replaceChildren(el("li", "muted", "Loading…"));
   try {
-    const prs: ListedPullRequest[] = JSON.parse(await gh("pr", "list", "--limit", String(limit), "--json", LIST_FIELDS, ...args));
+    // GitHub times out building the check status of 50 closed pull requests, and it matters little once closed.
+    const fields = state.length ? LIST_FIELDS.replace(",statusCheckRollup", "") : LIST_FIELDS;
+    const prs: ListedPullRequest[] = JSON.parse(await gh("pr", "list", "--limit", String(limit), "--json", fields, ...args));
     if ($("pr-list").dataset.key !== key) return; // A newer search replaced this one.
     const more = el("li", "pr-more");
     const button = el("button", "", "Load More");
@@ -278,7 +280,9 @@ export async function showPullRequest(number: number) {
     if (pr.mergeable === "CONFLICTING") say("bad", `Conflicts with ${pr.baseRefName}. Check out the branch and merge ${pr.baseRefName} into it to resolve them.`, ["Check Out", checkOut]);
     else if (pr.mergeStateStatus === "BEHIND") say("warn", `Behind ${pr.baseRefName}.`, ["Update Branch", () => updateBranch(pr, run)]);
     if (pr.autoMergeRequest) say("good", `Auto-merge is on (${pr.autoMergeRequest.mergeMethod.toLowerCase()}): it merges once checks and reviews pass.`, ["Turn Off", () => run(`Turning off auto-merge…`, ["pr", "merge", String(number), "--disable-auto"], `Turned off auto-merge for #${number}`, "Can't turn off auto-merge")]);
-    else if (pr.mergeStateStatus === "CLEAN") say("good", "Ready to merge.");
+    else if (pr.isDraft) {
+      // The draft line already says it can't be merged.
+    } else if (pr.mergeStateStatus === "CLEAN") say("good", "Ready to merge.");
     else if (pr.mergeStateStatus === "UNSTABLE") say("warn", "Checks that aren't required are failing, but it can be merged.");
     else if (pr.mergeStateStatus === "BLOCKED") say("warn", pr.reviewDecision === "REVIEW_REQUIRED" ? "Merging is blocked: it needs an approving review." : pr.reviewDecision === "CHANGES_REQUESTED" ? "Merging is blocked: changes were requested." : "Merging is blocked by a required check or rule.");
   }
@@ -722,7 +726,7 @@ function editLabels(pr: Details, run: (progress: string, args: string[], done: s
   });
 }
 
-// ponytail: the first 100 files per page, all pages; GitHub has no Viewed state on very large pull requests.
+// gh's --paginate follows $endCursor through every page of files.
 const VIEWED = `query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
   repository(owner: $owner, name: $name) { pullRequest(number: $number) { files(first: 100, after: $endCursor) { nodes { path viewerViewedState } pageInfo { hasNextPage endCursor } } } }
 }`;
