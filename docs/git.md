@@ -302,7 +302,8 @@ with it:
 
 Checks list failed ones first, and the bar above them counts them by state.
 While some checks fail or run, passed and skipped ones fold into a **Show**
-link. While checks run, the tab checks them every 15 seconds and redraws when
+link. While checks run, and for the first two minutes of a new pull request, before
+GitHub queues its checks, the tab checks them every 15 seconds and redraws when
 they finish or the merge state changes, so the checks, the status box, and the
 counts stay current; it waits while you type a comment.
 

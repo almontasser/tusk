@@ -715,7 +715,7 @@ function statusCard(pr: Details, run: (progress: string, args: string[], done: s
   else if (pr.mergeable === "CONFLICTING") line("bad", "warning", `Conflicts with ${pr.baseRefName}`, `Check out the branch and merge ${pr.baseRefName} into it to resolve them.`, ["Check Out", checkOut]);
   else if (pr.mergeStateStatus === "BEHIND") line("warn", "arrow-down", `Behind ${pr.baseRefName}`, "The base branch has commits this branch doesn't.", ["Update Branch", () => updateBranch(pr, run)]);
   else if (pr.autoMergeRequest) line("good", "clock", "Auto-merge is on", `It merges (${pr.autoMergeRequest.mergeMethod.toLowerCase()}) once checks and reviews pass.`, ["Turn Off", () => run(`Turning off auto-merge…`, ["pr", "merge", n, "--disable-auto"], `Turned off auto-merge for #${n}`, "Can't turn off auto-merge")]);
-  else if (pr.mergeStateStatus === "CLEAN" || pr.mergeStateStatus === "UNSTABLE" || pr.mergeStateStatus === "HAS_HOOKS") line("good", "check", "Ready to merge", pr.mergeStateStatus === "UNSTABLE" ? "Checks that aren't required are failing." : "");
+  else if (pr.mergeStateStatus === "CLEAN" || pr.mergeStateStatus === "UNSTABLE" || pr.mergeStateStatus === "HAS_HOOKS") line("good", "check", "Ready to merge", pr.mergeStateStatus !== "UNSTABLE" ? "" : summary === "pending" ? "Checks that aren't required are still running." : "Checks that aren't required are failing.");
   else if (pr.mergeStateStatus === "BLOCKED") line("warn", "lock", "Merging is blocked", "A required review, check, or rule isn't met yet.");
   else line("info", "loading codicon-modifier-spin", "Checking whether it can merge…", "Refresh in a moment.");
   return card;
@@ -828,12 +828,14 @@ function drawChecks(pr: Details, list: HTMLElement, bar: HTMLElement) {
 }
 
 /**
- * While checks run, looks at them every 15 seconds and redraws the tab when they or the merge state change, so the
+ * While checks run, GitHub is still working out whether it can merge, or the pull request is under two minutes old
+ * (before GitHub has queued its checks), looks at them every 15 seconds and redraws the tab when they or the merge state change, so the
  * checks, the status box, and the tab counts stay current. A hidden tab, or one where you're typing or editing a
  * comment, waits for the next tick. It stops once the tab shows another pull request or a newer version of this one.
  */
 function watchPullRequest(pr: Details) {
-  if (checksSummary(pr.statusCheckRollup) !== "pending") return;
+  const settling = checksSummary(pr.statusCheckRollup) === "pending" || pr.mergeStateStatus === "UNKNOWN" || Date.now() - Date.parse(pr.createdAt) < 120_000;
+  if (!settling || pr.state !== "OPEN") return;
   const page = $("pr-detail");
   const drawn = page.firstElementChild;
   const current = () => openNumber === pr.number && page.dataset.number === String(pr.number) && page.firstElementChild === drawn;
@@ -850,6 +852,8 @@ function watchPullRequest(pr: Details) {
           if (checksSummary(now.statusCheckRollup) !== "pending") updateBranchPullRequest();
           return renderPullRequest(pr.number);
         }
+        // Nothing changed, and nothing is left to wait for.
+        if (checksSummary(now.statusCheckRollup) !== "pending" && now.mergeStateStatus !== "UNKNOWN" && Date.now() - Date.parse(pr.createdAt) >= 120_000) return;
       } catch {
         // Tried again on the next tick.
       }
@@ -1671,7 +1675,7 @@ export async function createPullRequest() {
     commits.replaceChildren(
       ...(list.length ? list : [["", "No commits between the branches yet."]]).map(([hash, subject, author, at]) => {
         const li = el("li");
-        li.append(icon("git-commit", "muted"), el("span", "pr-row-main", subject), el("span", "muted", author ?? ""), el("span", "pr-when", at ? `${age(Number(at))} ago` : ""), el("code", "hash", hash));
+        li.append(icon("git-commit", "muted"), el("span", "pr-row-main", subject), el("span", "muted", author ?? ""), el("span", "pr-when", at ? (age(Number(at)) === "now" ? "just now" : `${age(Number(at))} ago`) : ""), el("code", "hash", hash));
         return li;
       }),
     );

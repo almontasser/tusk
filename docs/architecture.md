@@ -3960,7 +3960,8 @@ and `gh run rerun <run> --failed` take. `cleanLog` drops the job column and
 timestamps and prints each step once as a heading. `linkPaths` then tries each
 path in the log from each of its folders down, with `path_exists`, so a CI path
 such as `/home/runner/work/app/app/tests/X.php` finds `tests/X.php`. While any
-check runs, `watchPullRequest` reads `statusCheckRollup` and
+check runs, GitHub's merge state is `UNKNOWN`, or the pull request is under two
+minutes old (a new one has no checks queued yet), `watchPullRequest` reads `statusCheckRollup` and
 `mergeStateStatus` every 15 seconds and redraws the whole tab when either
 changes, which keeps the status box and the counts current too. The redraw keeps
 the section, scroll, and draft, and it waits while the tab is hidden, a comment
