@@ -168,8 +168,17 @@ export function lineChanges(before: string[], after: string[]): LineChange[] {
   return changes;
 }
 
-/** One entry of `statusCheckRollup` from `gh pr list/view --json`: a check run or a commit status. */
-export type Check = { name?: string; context?: string; status?: string; conclusion?: string; state?: string; detailsUrl?: string; targetUrl?: string; workflowName?: string; startedAt?: string; completedAt?: string };
+/**
+ * One entry of `statusCheckRollup` from `gh pr list/view --json`: a check run or a commit status. `isRequired` comes
+ * from a separate GraphQL lookup (prchecks.ts), and is unset until it arrives.
+ */
+export type Check = { name?: string; context?: string; status?: string; conclusion?: string; state?: string; detailsUrl?: string; targetUrl?: string; workflowName?: string; startedAt?: string; completedAt?: string; isRequired?: boolean };
+
+/**
+ * Names a check across lookups: a status by its context, a check run by its name and details URL, since two
+ * workflows can have jobs with the same name.
+ */
+export const checkKey = (c: { name?: string | null; context?: string | null; detailsUrl?: string | null }) => c.context ?? `${c.name ?? ""} ${c.detailsUrl ?? ""}`;
 
 /** How long a check ran, such as "1m 5s", or has run so far when it hasn't finished. Empty without a start time. */
 export function checkDuration(c: Check, now = Date.now()): string {
@@ -666,10 +675,47 @@ export function askpassKind(prompt: string, confirm: boolean): "confirm" | "yesn
 
 const checkOrder: Record<CheckState, number> = { failed: 0, pending: 1, passed: 2, skipped: 3 };
 
-/** Checks with failures first, then running ones, then passed and skipped, each group by name. */
+/**
+ * Checks with failures first, then running ones, then passed and skipped. In each, the checks required for merging
+ * come first, so a failure that blocks the merge leads the list, then by name.
+ */
 export function sortChecks(checks: Check[]): Check[] {
   const name = (c: Check) => c.name ?? c.context ?? "";
-  return [...checks].sort((a, b) => checkOrder[checkState(a)] - checkOrder[checkState(b)] || name(a).localeCompare(name(b)));
+  return [...checks].sort((a, b) => checkOrder[checkState(a)] - checkOrder[checkState(b)] || Number(!!b.isRequired) - Number(!!a.isRequired) || name(a).localeCompare(name(b)));
+}
+
+/**
+ * Where a path from CI can be in the project, most specific first: the path, then without each leading folder in
+ * turn. CI checks out to another folder, such as /home/runner/work/app/app or D:\a\app\app, so one of the shorter
+ * ones is usually the project's.
+ */
+export function pathTails(path: string): string[] {
+  const parts = path.replace(/\\/g, "/").split("/").filter((p) => p && !/^[A-Za-z]:$/.test(p));
+  return parts.map((_, i) => parts.slice(i).join("/"));
+}
+
+/** A job step from GitHub's REST API (`actions/jobs/ID`). */
+export type JobStep = { name: string; number: number; status: string; conclusion: string | null; started_at: string | null; completed_at: string | null };
+
+/** A running job's steps as text, one a line, with each one's state and how long it ran. */
+export function jobSteps(steps: JobStep[], now = Date.now()): string {
+  const marks = { passed: "✓", failed: "✗", pending: "●", skipped: "–" };
+  return steps
+    .map((s) => {
+      const c: Check = { status: s.status.toUpperCase(), conclusion: s.conclusion?.toUpperCase(), startedAt: s.started_at ?? undefined, completedAt: s.completed_at ?? undefined };
+      const state = checkState(c);
+      const took = checkDuration(c, now);
+      if (state === "pending" && !s.started_at) return `○ ${s.name}  (waiting)`;
+      return `${marks[state]} ${s.name}${took ? `  ${state === "pending" ? `running ${took}` : took}` : ""}`;
+    })
+    .join("\n");
+}
+
+/** A deployment status's state (SUCCESS, FAILURE, INACTIVE, IN_PROGRESS…) as a check state, for its icon. */
+export function deploymentState(state: string | undefined): CheckState {
+  if (state === "SUCCESS") return "passed";
+  if (state === "FAILURE" || state === "ERROR") return "failed";
+  return state === "INACTIVE" ? "skipped" : "pending";
 }
 
 /** The GitHub Actions run and job of a check, from its details URL, or null for other checks. */

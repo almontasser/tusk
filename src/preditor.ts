@@ -5,6 +5,7 @@ import { withProgress } from "./status";
 import { $, DETAIL_FIELDS, type Details, FIELDS, gh, host, hub, icons, type PullRequest, type Thread } from "./prshared";
 import { lineComments } from "./prthreads";
 import { showFileDiff } from "./prdiff";
+import { branchAnnotations } from "./prchecks";
 
 // ---- Current branch ----
 
@@ -22,11 +23,13 @@ export async function updateBranchPullRequest() {
   try {
     const pr = await showBranchPullRequest(lookup);
     if (lookup !== branchLookups) return;
+    void branchAnnotations(pr);
     branchThreads = { number: pr.number, threads: await lineComments(pr.number) };
   } catch {
     // No pull request for this branch, or no GitHub remote.
     if (lookup !== branchLookups) return;
     branchThreads = undefined;
+    void branchAnnotations();
   }
   for (const model of monaco.editor.getModels()) decorateComments(model);
 }
