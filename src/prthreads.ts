@@ -2,6 +2,7 @@
 import { showError } from "./status";
 import { mod } from "./platform.ts";
 import { el, gh, host, markdown, myLogin, pages, type ReviewComment, type Thread, when } from "./prshared";
+import { SUBJECT, type Subject } from "./prconversationdata";
 
 let assignable: { root: string; logins: Promise<string[]> } | undefined;
 
@@ -101,26 +102,33 @@ export async function lineComments(number: number): Promise<Thread[]> {
   const jq = ".[] | {id, path, line, start_line, side, body, user: .user.login, in_reply_to_id, created_at, diff_hunk}";
   const [out, states] = await Promise.all([
     gh("api", "--paginate", `repos/{owner}/{repo}/pulls/${number}/comments`, "--jq", jq),
-    threadStates(number).catch(() => new Map<number, { id: string; resolved: boolean }>()),
+    threadStates(number).catch(() => new Map<number, ThreadState>()),
   ]);
   const comments: ReviewComment[] = out.split("\n").filter(Boolean).map((l) => JSON.parse(l));
   const threads = new Map<number, Thread>();
+  const subjects = new Map([...states.values()].flatMap((t) => t.comments.map((c) => [c.databaseId, c] as const)));
+  for (const c of comments) c.subject = subjects.get(c.id);
   for (const c of comments) if (!c.in_reply_to_id) threads.set(c.id, { ...c, comments: [c], node: states.get(c.id)?.id, resolved: states.get(c.id)?.resolved });
   for (const c of comments) if (c.in_reply_to_id) threads.get(c.in_reply_to_id)?.comments.push(c);
   return [...threads.values()];
 }
 
-// gh's --paginate follows $endCursor through every page of threads.
+// gh's --paginate follows $endCursor through every page of threads. A thread's first 100 comments carry their
+// reactions and whether you can hide them, which REST doesn't say.
 const THREADS = `query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
-  repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100, after: $endCursor) { nodes { id isResolved comments(first: 1) { nodes { databaseId } } } pageInfo { hasNextPage endCursor } } } }
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100, after: $endCursor) { nodes { id isResolved comments(first: 100) { nodes { databaseId ${SUBJECT} } } } pageInfo { hasNextPage endCursor } } } }
 }`;
 
-/** Each thread's GraphQL ID and whether it's resolved, by the REST ID of its first comment. */
+type ThreadState = { id: string; resolved: boolean; comments: (Subject & { databaseId: number })[] };
+/**
+ * Each thread's GraphQL ID, whether it's resolved, and its comments' reactions and moderation, by the REST ID of
+ * its first comment.
+ */
 async function threadStates(number: number) {
-  const jq = ".data.repository.pullRequest.reviewThreads.nodes[] | {id, resolved: .isResolved, first: .comments.nodes[0].databaseId}";
+  const jq = ".data.repository.pullRequest.reviewThreads.nodes[] | {id, resolved: .isResolved, comments: .comments.nodes}";
   const out = await gh("api", "graphql", "--paginate", "-F", "owner={owner}", "-F", "name={repo}", "-F", `number=${number}`, "-f", `query=${THREADS}`, "--jq", jq);
-  const lines: { id: string; resolved: boolean; first: number }[] = out.split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  return new Map(lines.map((t) => [t.first, { id: t.id, resolved: t.resolved }]));
+  const lines: ThreadState[] = out.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  return new Map(lines.filter((t) => t.comments.length).map((t) => [t.comments[0].databaseId, t]));
 }
 
 /** The comment being edited, and the one whose delete waits for a second click, by their targets' keys. */

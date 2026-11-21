@@ -1,6 +1,7 @@
 // Pull requests: what the other pr*.ts modules share. The types, the `gh` runner, Markdown, and small DOM helpers.
 import { invoke } from "@tauri-apps/api/core";
 import { age, type Check } from "./gitparse";
+import { emojify, type Subject } from "./prconversationdata";
 
 type Author = { login: string };
 export type PullRequest = {
@@ -37,7 +38,7 @@ export type Details = ListedPullRequest & {
 };
 
 /** A comment on a line of the diff. `line` is null when the code it was on has changed since. */
-export type ReviewComment = { id: number; path: string; line: number | null; start_line: number | null; side: "LEFT" | "RIGHT"; body: string; user: string; in_reply_to_id: number | null; created_at: string; diff_hunk?: string };
+export type ReviewComment = { id: number; path: string; line: number | null; start_line: number | null; side: "LEFT" | "RIGHT"; body: string; user: string; in_reply_to_id: number | null; created_at: string; diff_hunk?: string; /** Its reactions and moderation, from GraphQL. */ subject?: Subject };
 /** A line comment and its replies. `node` is the thread's GraphQL ID, for resolving it. */
 export type Thread = ReviewComment & { comments: ReviewComment[]; node?: string; resolved?: boolean };
 
@@ -72,15 +73,55 @@ export function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = ""
 // The Markdown parser and sanitizer load with the first pull request you open, not with the app.
 let markdownLibraries: { marked: typeof import("marked").marked; DOMPurify: typeof import("dompurify").default } | undefined;
 export async function loadMarkdown() {
-  if (markdownLibraries) return;
-  const [{ marked }, { default: DOMPurify }] = await Promise.all([import("marked"), import("dompurify")]);
+  emojiLoad ??= loadEmojis();
+  if (markdownLibraries) return emojiLoad;
+  const [{ marked }, { default: DOMPurify }] = await Promise.all([import("marked"), import("dompurify"), emojiLoad]);
   markdownLibraries = { marked, DOMPurify };
+}
+
+/** GitHub's emoji, name to image URL, for `:name:` in Markdown. Empty until loaded, or when `gh` can't fetch them. */
+let emojis: Record<string, string> = {};
+let emojiLoad: Promise<void> | undefined;
+const EMOJI_KEY = "pr-emojis";
+/**
+ * Loads GitHub's emoji list, kept in this computer's storage for a week, so only the first pull request you open
+ * waits for it. An older copy is used at once and fetched again in the background.
+ */
+async function loadEmojis() {
+  let saved: { at: number; map: Record<string, string> } | null = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(EMOJI_KEY) ?? "null");
+  } catch {
+    // Storage is off or the copy is broken; fetch it.
+  }
+  if (saved?.map) emojis = saved.map;
+  if (saved?.map && Date.now() - saved.at < 7 * 24 * 3600 * 1000) return;
+  const refresh = gh("api", "emojis").then(
+    (out) => {
+      emojis = JSON.parse(out);
+      try {
+        localStorage.setItem(EMOJI_KEY, JSON.stringify({ at: Date.now(), map: emojis }));
+      } catch {
+        // Storage is off; the list lasts until the app quits.
+      }
+    },
+    () => {},
+  );
+  if (!saved?.map) await refresh;
+}
+
+/** A custom emoji's image, such as :octocat:'s, sized by CSS. Only https images load. */
+function emojiImage(name: string, url: string) {
+  const img = el("img", "emoji");
+  img.alt = img.title = `:${name}:`;
+  if (/^https:\/\//.test(url)) img.src = url;
+  return img;
 }
 
 /**
  * Renders GitHub Markdown. Pull request text comes from other people, and this page can call the app's
  * commands, so the HTML is sanitized, and links open in the browser instead of the app. `#123` and `@name`
- * become links to the repository's issue or pull request and to the person's profile, as on GitHub.
+ * become links to the repository's issue or pull request and to the person's profile, and `:tada:` becomes 🎉, as on GitHub.
  */
 export function markdown(text: string, repo: string): HTMLElement {
   const { marked, DOMPurify } = markdownLibraries!;
@@ -92,16 +133,21 @@ export function markdown(text: string, repo: string): HTMLElement {
   const texts: Text[] = [];
   while (walker.nextNode()) if (!walker.currentNode.parentElement?.closest("a, code, pre")) texts.push(walker.currentNode as Text);
   for (const node of texts) {
-    const parts = node.data.split(/(?<![\w/&#])(#\d+|@[A-Za-z0-9](?:-?[A-Za-z0-9])*)\b/);
-    if (parts.length === 1) continue;
-    node.replaceWith(
-      ...parts.map((part, i) => {
-        if (i % 2 === 0) return part;
+    // `:tada:` becomes 🎉 (or an image for emoji with no text form), as on GitHub; then #123 and @name become links.
+    const out: (string | Node)[] = [];
+    for (const piece of emojify(node.data, emojis)) {
+      if (typeof piece !== "string") {
+        out.push(emojiImage(piece.name, piece.url));
+        continue;
+      }
+      piece.split(/(?<![\w/&#])(#\d+|@[A-Za-z0-9](?:-?[A-Za-z0-9])*)\b/).forEach((part, i) => {
+        if (i % 2 === 0) return part && out.push(part);
         const a = el("a", "", part);
         a.href = part.startsWith("#") ? `${repo}/issues/${part.slice(1)}` : `https://github.com/${part.slice(1)}`;
-        return a;
-      }),
-    );
+        out.push(a);
+      });
+    }
+    if (out.length !== 1 || out[0] !== node.data) node.replaceWith(...out);
   }
   // Every click on a link opens it in the browser, never in the app's window.
   div.onclick = (e) => {

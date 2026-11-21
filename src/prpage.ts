@@ -16,6 +16,8 @@ import { drawChecks } from "./prchecks";
 import { drawZones, lastReviewed, nextUnresolved, prepareDiff, replyTo, setResolved, setViewed, showFileDiff, shown, type Since, sinceReview, viewedFiles } from "./prdiff";
 import { editAssignees, editLabels, merge, more, requestReview, updateBranch } from "./practions";
 import { branchThreads, decorateComments, updateBranchPullRequest } from "./preditor";
+import { commitsRow, decorate, dismissLink, eventRow, foldItems, loadConversation, savedRepliesButton } from "./prconversation";
+import { eventLine, mergeByDate, type Subject } from "./prconversationdata";
 
 // ---- Details ----
 
@@ -83,6 +85,7 @@ export async function renderPullRequest(number: number) {
   const entry = pages.get(number);
   if (!entry) return;
   const libraries = loadMarkdown();
+  const talk = loadConversation(number);
   // Refreshing, such as after you comment, keeps the pull request on screen until the new version is ready.
   const page = entry.el;
   let pr: Details;
@@ -106,6 +109,7 @@ export async function renderPullRequest(number: number) {
     return;
   }
   await libraries;
+  const conversation = await talk;
   if (pages.get(number) !== entry) return; // The tab closed meanwhile.
   entry.viewed = viewed;
   markSeen(number, pr.updatedAt);
@@ -208,7 +212,9 @@ export async function renderPullRequest(number: number) {
 
   // ---- Conversation ----
   function conversationSection(): HTMLElement[] {
-    const timeline: { at: string; node: HTMLElement }[] = [];
+    // Each item is drawn only when it shows, so a long conversation's folded middle renders no Markdown.
+    const items: { at: string; draw: () => HTMLElement }[] = [];
+    const permission = conversation?.permission ?? "";
     // One entry of the timeline: an avatar beside a card with the author, what they did, and when.
     const item = (user: string, content: HTMLElement[], className = "") => {
       const row = el("div", `pr-event ${className}`);
@@ -217,101 +223,137 @@ export async function renderPullRequest(number: number) {
       row.append(avatar(user, repo, 28), card);
       return row;
     };
-    const entry = (author: string, label: string, body: string, at: string, className = "") => {
+    const entry = (author: string, label: string, body: string, at: string, className = "", subject?: Subject) => {
       const meta = el("div", "pr-meta");
       meta.append(el("strong", "", author), label ? ` ${label}` : "", when(at));
-      return item(author, [meta, markdown(body, repo)], className);
+      return item(author, decorate([meta, markdown(body, repo)], { number, user: author, body, subject, reload }), className);
     };
     // A comment you can edit or delete when it's yours; it redraws in place while you do.
-    const editable = (user: string, body: string, target: Target, at: string, label = "") => {
+    const editable = (user: string, body: string, target: Target, at: string, label = "", subject?: Subject, state = "") => {
       const card = el("div", "pr-comment");
-      const draw = () => card.replaceChildren(...commentBlock(number, user, body, target, repo, draw, reload, at, label));
+      const draw = () => card.replaceChildren(...decorate(commentBlock(number, user, body, target, repo, draw, reload, at, label), { number, user, body, subject, reload, review: state ? { state, permission } : undefined }));
       draw();
       const row = el("div", "pr-event");
       row.append(avatar(user, repo, 28), card);
       return row;
     };
     const verdicts: Record<string, string> = { APPROVED: "approved these changes", CHANGES_REQUESTED: "requested changes", COMMENTED: "reviewed", DISMISSED: "reviewed (dismissed)" };
-    for (const r of pr.reviews)
-      if (r.state !== "PENDING" && (r.body || r.state !== "COMMENTED")) {
-        const kind = r.state === "APPROVED" ? "approved" : r.state === "CHANGES_REQUESTED" ? "changes" : "";
-        timeline.push({ at: r.submittedAt, node: r.body ? editable(r.author.login, r.body, reviewTarget(r.id), r.submittedAt, verdicts[r.state] ?? "") : smallEvent(r.author.login, verdicts[r.state] ?? r.state.toLowerCase(), r.submittedAt, kind) });
-      }
-    for (const c of pr.comments) {
-      const id = c.url.match(/#issuecomment-(\d+)$/)?.[1];
-      timeline.push({ at: c.createdAt, node: id ? editable(c.author.login, c.body, restTarget(`repos/{owner}/{repo}/issues/comments/${id}`), c.createdAt) : entry(c.author.login, "", c.body, c.createdAt) });
-    }
-    // Line comment threads, each under a link to its place in the diff.
-    for (const t of threads) {
-      const box = el("div", `pr-thread-card${t.resolved ? " resolved" : ""}`);
-      const where = el("button", "pr-thread-link");
-      where.append(icon("file-code"), ` ${t.path}`, el("span", "muted", t.line ? `:${t.start_line && t.start_line !== t.line ? `${t.start_line}–` : ""}${t.line}` : " (outdated)"));
-      if (t.resolved) where.append(el("span", "pr-resolved", "Resolved"));
-      where.onclick = () => showFileDiff(pr, t.path, threads, t);
-      box.append(where);
-      if (t.diff_hunk) box.append(hunk(t.diff_hunk));
-      const comments = t.comments.map((c) => {
-        const card = el("div", "pr-thread-comment");
-        const draw = () => card.replaceChildren(...commentBlock(number, c.user, c.body, restTarget(`repos/{owner}/{repo}/pulls/comments/${c.id}`), repo, draw, reload, c.created_at));
-        draw();
-        return card;
+    const review = (r: { id: string; author: { login: string } | null; state: string; body: string; submittedAt?: string | null }, subject?: Subject) => {
+      if (r.state === "PENDING" || (!r.body && r.state === "COMMENTED")) return;
+      const user = r.author?.login ?? "ghost";
+      const at = r.submittedAt ?? "";
+      const kind = r.state === "APPROVED" ? "approved" : r.state === "CHANGES_REQUESTED" ? "changes" : "";
+      items.push({
+        at,
+        draw: () => {
+          if (r.body) return editable(user, r.body, reviewTarget(r.id), at, verdicts[r.state] ?? "", subject, r.state);
+          const row = smallEvent(user, verdicts[r.state] ?? r.state.toLowerCase(), at, kind);
+          const dismiss = dismissLink(user, r.id, r.state, permission, reload);
+          if (dismiss) row.append(" · ", dismiss);
+          return row;
+        },
       });
-      // Reply and Resolve, as under a thread in the diff. Reply opens a box in the card.
-      const footer = el("div", "pr-thread-footer");
-      const link = (label: string, run: () => unknown) => {
-        const b = el("button", "link", label);
-        b.onclick = run;
-        footer.append(b);
-      };
-      if (t.line || t.node) {
-        link(pendingReview(number) && t.node ? "Reply (joins your review)" : "Reply", () => {
-          const form = el("div", "pr-thread-reply");
-          const text = el("textarea");
-          text.placeholder = `Reply to ${t.user} (Markdown)`;
-          const send = el("button", "primary", "Reply");
-          const cancel = el("button", "", "Cancel");
-          const buttons = el("div", "pr-actions");
-          buttons.append(cancel, send);
-          cancel.onclick = () => form.replaceWith(footer);
-          send.onclick = async () => {
-            if (!text.value.trim()) return text.focus();
-            send.disabled = true;
-            await replyTo(number, t, text.value.trim()).catch((e) => (showError("Can't reply", e), (send.disabled = false)));
-          };
-          text.onkeydown = (e) => {
-            if (e.key === "Enter" && mod(e)) send.click();
-            if (e.key === "Escape") cancel.click();
-          };
-          form.append(writer(text, repo, number), buttons);
-          footer.replaceWith(form);
-          text.focus();
-        });
-        if (t.node) link(t.resolved ? "Unresolve" : "Resolve", () => setResolved(number, t, !t.resolved));
+    };
+    if (conversation) {
+      // GraphQL's timeline, in GitHub's order, with its events.
+      for (const e of conversation.entries) {
+        if ("commits" in e) {
+          items.push({ at: e.at, draw: () => commitsRow(e.commits, e.at, (oid) => prepareDiff(pr).then(() => showCommitDiff(oid), (err) => showError(`Can't fetch #${number}`, err))) });
+          continue;
+        }
+        const n = e.node;
+        if (n.type === "PullRequestReview") review({ id: n.id!, author: n.author ?? null, state: n.state ?? "", body: n.body ?? "", submittedAt: n.submittedAt }, n as Subject);
+        else if (n.type === "IssueComment") {
+          const user = n.author?.login ?? "ghost";
+          items.push({ at: e.at, draw: () => editable(user, n.body ?? "", restTarget(`repos/{owner}/{repo}/issues/comments/${n.databaseId}`), e.at, "", n as Subject) });
+        } else {
+          const line = eventLine(n);
+          if (line) items.push({ at: e.at, draw: () => eventRow(line, e.at, repo) });
+        }
       }
-      // A resolved thread is folded, as on GitHub, until you open it.
-      if (t.resolved && !expanded.has(t.id)) {
-        const open = el("button", "link pr-thread-more", `Show ${comments.length} resolved ${comments.length === 1 ? "comment" : "comments"}`);
-        open.onclick = () => (expanded.add(t.id), open.replaceWith(...comments, footer));
-        box.append(open);
-      } else box.append(...comments, footer);
-      const row = el("div", "pr-event");
-      row.append(avatar(t.user, repo, 28), box);
-      timeline.push({ at: t.created_at, node: row });
+    } else {
+      // Without the timeline, such as on an older GitHub Enterprise, the comments and reviews gh gives.
+      for (const r of pr.reviews) review(r);
+      for (const c of pr.comments) {
+        const id = c.url.match(/#issuecomment-(\d+)$/)?.[1];
+        items.push({ at: c.createdAt, draw: () => (id ? editable(c.author.login, c.body, restTarget(`repos/{owner}/{repo}/issues/comments/${id}`), c.createdAt) : entry(c.author.login, "", c.body, c.createdAt)) });
+      }
+      const time = (at: string) => Date.parse(at) || 0; // A missing date sorts first rather than breaking the order.
+      items.sort((a, b) => time(a.at) - time(b.at));
     }
-    const time = (at: string) => Date.parse(at) || 0; // A missing date sorts first rather than breaking the order.
-    timeline.sort((a, b) => time(a.at) - time(b.at));
-    const nodes: HTMLElement[] = [];
+    // Line comment threads, each under a link to its place in the diff, sorted in by date.
+    const threadItems = threads.map((t) => ({ at: t.created_at, draw: () => threadCard(t) }));
+    const time = (at: string) => Date.parse(at) || 0;
+    threadItems.sort((a, b) => time(a.at) - time(b.at));
+    const all = mergeByDate(items, threadItems);
     // Your own description has Edit, as a comment does.
     const describe: Target = { key: `body:${number}`, save: (body) => gh("pr", "edit", String(number), "--body", body) };
-    const description = pr.author.login === myLogin && pr.body ? editable(pr.author.login, pr.body, describe, pr.createdAt, "opened this pull request") : entry(pr.author.login, "opened this pull request", pr.body || "_No description._", pr.createdAt);
+    const description = pr.author.login === myLogin && pr.body ? editable(pr.author.login, pr.body, describe, pr.createdAt, "opened this pull request", conversation?.pr) : entry(pr.author.login, "opened this pull request", pr.body || "_No description._", pr.createdAt, "", conversation?.pr);
     description.classList.add("description");
-    nodes.push(description);
-    nodes.push(...timeline.map((t) => t.node));
-    if (pr.state === "MERGED") nodes.push(smallEvent("", `Merged into ${pr.baseRefName}`, "", "merged"));
-    else if (pr.state === "CLOSED") nodes.push(smallEvent("", "Closed without merging", "", "closed"));
+    const nodes: HTMLElement[] = [description, ...foldItems(number, all.map((i) => i.draw))];
+    if (!conversation && pr.state === "MERGED") nodes.push(smallEvent("", `Merged into ${pr.baseRefName}`, "", "merged"));
+    else if (!conversation && pr.state === "CLOSED") nodes.push(smallEvent("", "Closed without merging", "", "closed"));
     const list = el("div", "pr-timeline");
     list.append(...nodes);
     return [list, composer()];
+  }
+
+  /** A line comment thread, under a link to its place in the diff, with Reply and Resolve. */
+  function threadCard(t: Thread) {
+    const box = el("div", `pr-thread-card${t.resolved ? " resolved" : ""}`);
+    const where = el("button", "pr-thread-link");
+    where.append(icon("file-code"), ` ${t.path}`, el("span", "muted", t.line ? `:${t.start_line && t.start_line !== t.line ? `${t.start_line}–` : ""}${t.line}` : " (outdated)"));
+    if (t.resolved) where.append(el("span", "pr-resolved", "Resolved"));
+    where.onclick = () => showFileDiff(pr, t.path, threads, t);
+    box.append(where);
+    if (t.diff_hunk) box.append(hunk(t.diff_hunk));
+    const comments = t.comments.map((c) => {
+      const card = el("div", "pr-thread-comment");
+      const draw = () => card.replaceChildren(...decorate(commentBlock(number, c.user, c.body, restTarget(`repos/{owner}/{repo}/pulls/comments/${c.id}`), repo, draw, reload, c.created_at), { number, user: c.user, body: c.body, subject: c.subject, reload }));
+      draw();
+      return card;
+    });
+    // Reply and Resolve, as under a thread in the diff. Reply opens a box in the card.
+    const footer = el("div", "pr-thread-footer");
+    const link = (label: string, run: () => unknown) => {
+      const b = el("button", "link", label);
+      b.onclick = run;
+      footer.append(b);
+    };
+    if (t.line || t.node) {
+      link(pendingReview(number) && t.node ? "Reply (joins your review)" : "Reply", () => {
+        const form = el("div", "pr-thread-reply");
+        const text = el("textarea");
+        text.placeholder = `Reply to ${t.user} (Markdown)`;
+        const send = el("button", "primary", "Reply");
+        const cancel = el("button", "", "Cancel");
+        const buttons = el("div", "pr-actions");
+        buttons.append(cancel, send);
+        cancel.onclick = () => form.replaceWith(footer);
+        send.onclick = async () => {
+          if (!text.value.trim()) return text.focus();
+          send.disabled = true;
+          await replyTo(number, t, text.value.trim()).catch((e) => (showError("Can't reply", e), (send.disabled = false)));
+        };
+        text.onkeydown = (e) => {
+          if (e.key === "Enter" && mod(e)) send.click();
+          if (e.key === "Escape") cancel.click();
+        };
+        form.append(writer(text, repo, number), buttons);
+        footer.replaceWith(form);
+        text.focus();
+      });
+      if (t.node) link(t.resolved ? "Unresolve" : "Resolve", () => setResolved(number, t, !t.resolved));
+    }
+    // A resolved thread is folded, as on GitHub, until you open it.
+    if (t.resolved && !expanded.has(t.id)) {
+      const open = el("button", "link pr-thread-more", `Show ${comments.length} resolved ${comments.length === 1 ? "comment" : "comments"}`);
+      open.onclick = () => (expanded.add(t.id), open.replaceWith(...comments, footer));
+      box.append(open);
+    } else box.append(...comments, footer);
+    const row = el("div", "pr-event");
+    row.append(avatar(t.user, repo, 28), box);
+    return row;
   }
 
   /** A one-line event in the timeline, such as an approval without a comment. */
@@ -390,7 +432,7 @@ export async function renderPullRequest(number: number) {
     // ⌘⏎ does the main action, as in the diff's comment box.
     text.onkeydown = (e) => void (e.key === "Enter" && mod(e) && buttons.querySelector<HTMLButtonElement>("button.primary")!.click());
     const hint = el("span", "muted pr-hint", `${isMac ? "⌘" : "Ctrl+"}⏎ to ${hasPending ? "submit" : "comment"}`);
-    buttons.prepend(hint);
+    buttons.prepend(savedRepliesButton(text), hint);
     box.append(writer(text, repo, number), buttons);
     return box;
   }

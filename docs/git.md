@@ -365,7 +365,35 @@ Type `@` in any comment box to pick a person: the pull request's participants
 come first, then everyone who can be assigned in the repository. ↑ and ↓
 choose, Enter or Tab inserts, and Escape closes the list. A comment you haven't
 sent stays in the box when you close the tab or restart Tusk. `#123` links to that issue or pull request, and
-`@name` to that person's profile.
+`@name` to that person's profile. Emoji shortcodes such as `:+1:` and `:tada:`
+show as emoji, as on GitHub.
+
+The conversation is GitHub's timeline. Between the comments and reviews, one-line
+events show what happened: commits pushed (each run of commits as one entry,
+with a line per commit that opens its changes), force pushes, labels added or
+removed, review requests, title changes, draft and ready-for-review changes,
+closing, reopening, merging, deleting the branch, dismissed reviews, and
+mentions in other issues and pull requests. A long conversation shows its first
+and last items; click **Show more** in the middle to read the rest, a page at a
+time.
+
+Reactions show under the description, comments, review summaries, and line
+comments, with yours highlighted. Click a reaction to add or remove yours, or
+click the smiley button to pick one. Click **Quote** on any comment to put it
+in the comment box as a `>` quote. To quote part of a comment, select that text
+first.
+
+The bookmark button beside the comment box inserts a saved reply where the
+cursor is. It also saves the comment you typed as a new reply. To add, rename,
+change, or delete saved replies, click **Manage saved replies**, which opens
+**Saved replies** in Settings. Saved replies are yours, in every project.
+
+If you can moderate the repository, comments and review summaries have
+**Hide**, which asks for a reason (such as spam or off topic) and asks you to
+confirm. A hidden comment shows folded, with its reason; click **Show comment**
+to read it, or **Unhide** to show it to everyone again. If you can write to the
+repository, approvals and change requests have **Dismiss**, which asks for the
+message GitHub shows in the timeline, then asks you to confirm.
 
 Line comments appear in the conversation under the file and lines they're on,
 with the last lines of code they're about. Click the file name to open the diff

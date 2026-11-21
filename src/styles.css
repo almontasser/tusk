@@ -3259,3 +3259,28 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .remote-note-actions { display: flex; gap: 12px; }
 .remote-empty { padding: 16px 14px; color: var(--muted); display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .remote-empty p { margin: 0; }
+
+/* Pull requests: conversation */
+.pr-small-event { flex-wrap: wrap; }
+.pr-small-event code { font-family: var(--mono); font-size: 11px; }
+.pr-small-event del { color: var(--faint); }
+.pr-small-event a { color: var(--accent); cursor: pointer; }
+.pr-small-event.open .codicon { color: var(--green); }
+.pr-small-event.draft .codicon { color: var(--muted); }
+.pr-event-commits { flex-basis: 100%; list-style: none; margin: 2px 0 0; padding: 0 0 0 20px; display: flex; flex-direction: column; gap: 2px; }
+.pr-event-commits li { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pr-event-commits .link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); text-align: start; }
+.pr-reactions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.pr-reaction { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 11px; font-size: 12px; color: var(--text); background: transparent; border: 1px solid var(--border); cursor: pointer; }
+.pr-reaction:hover:not(:disabled) { background: var(--hover); }
+.pr-reaction[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.pr-reaction:disabled { cursor: default; opacity: 1; }
+.pr-add-reaction { color: var(--muted); font-size: 14px; }
+.pr-hidden-comment { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; padding: 4px 0; }
+.pr-fold { display: flex; align-items: center; gap: 6px; align-self: center; margin: 4px auto; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: var(--accent); background: var(--panel); border: 1px solid var(--border); cursor: pointer; }
+.pr-fold:hover { background: var(--hover); }
+.markdown img.emoji { width: 1.25em; height: 1.25em; vertical-align: -0.25em; }
+.pr-saved-replies { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+.pr-saved-reply { display: flex; flex-direction: column; gap: 4px; }
+.pr-saved-reply textarea { width: 100%; resize: vertical; font: inherit; }
+.pr-saved-reply input[type="text"] { flex: 1; }
