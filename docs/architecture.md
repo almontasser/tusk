@@ -4112,10 +4112,12 @@ reviews without events. Line threads still come from REST (`lineComments`); its
 fields, by `databaseId`, onto `ReviewComment.subject`.
 
 `prconversationdata.ts` holds the logic with no DOM, which
-`prconversationdata.test.ts` tests. `entries` keeps the API's order (commits
+`prconversationdata.test.ts` tests. It imports nothing, so it sits above
+`prshared.ts`, which imports `emojify` and the `Subject` type from it.
+`prconversation.ts` sits between `prthreads.ts` and `prpage.ts`. `entries` keeps the API's order (commits
 have no date in the timeline and their commit dates can be months old, so a
 run of commits takes the date before it), groups runs of commits, and drops the
-`ClosedEvent` that pairs with a `MergedEvent`. `mergeByDate` sorts line threads
+`ClosedEvent` that has a `MergedEvent`'s time. `mergeByDate` sorts line threads
 in by date. `eventLine` turns an event into the parts of its line. Also there:
 `quote`, `emojiText` and `emojify`, `toggleReaction`, `canDismiss`, and
 `folded`.
@@ -4134,7 +4136,9 @@ redraws only its bar, and puts it back if GitHub refuses. Reviews have no
 reviews when `viewerPermission` is `ADMIN`, `MAINTAIN`, or `WRITE`.
 
 `markdown` replaces `:name:` in text nodes after sanitizing, outside code and
-links, with DOM nodes. `gh api emojis` maps names to image URLs whose file
+links, with DOM nodes. Like GitHub (checked with `gh api markdown`), a known
+name needs no space around it, and an unknown name's closing colon can open the
+next name. `gh api emojis` maps names to image URLs whose file
 names hold the code points. A single code point, a keycap, or a flag becomes
 text; other sequences lose their joiners in the file name, so they stay images,
 as do GitHub's own emoji such as `:octocat:`. `loadMarkdown` loads the list,

@@ -190,6 +190,8 @@ export function dismissLink(user: string, reviewId: string, state: string, permi
 function quoteInto(number: number, body: HTMLElement, markdownText: string) {
   const text = pages.get(number)?.el.querySelector<HTMLTextAreaElement>(".pr-composer textarea");
   if (!text) return;
+  // On Preview, the box is hidden; Write shows it.
+  if (text.hidden) text.closest(".pr-writer")?.querySelector<HTMLButtonElement>(".pr-writer-tabs button")?.click();
   const sel = getSelection();
   const selected = sel && !sel.isCollapsed && body.contains(sel.anchorNode) && body.contains(sel.focusNode) ? sel.toString() : "";
   text.value = appendBlock(text.value, quote(selected.trim() ? selected : markdownText));
@@ -387,16 +389,18 @@ registerSettingsSection({
       list.replaceChildren(
         ...Object.entries(replies()).map(([name, body]) => {
           const { title, text } = row(name, body);
-          // A change saves at once; renaming keeps the reply's place in the list.
+          // A change saves at once, without redrawing, so Tab still moves on. Renaming keeps the reply's place.
+          let current = name;
           const save = () => {
             const next = title.value.trim();
-            if (!next) return void (title.value = name);
-            if (next !== name && next in replies()) return showError(`Can't rename "${name}"`, `A saved reply named "${next}" exists.`), void (title.value = name);
-            saveReplies(Object.fromEntries(Object.entries(replies()).map(([k, v]) => (k === name ? [next, text.value] : [k, v]))));
-            draw();
+            if (!next) return void (title.value = current);
+            if (next !== current && next in replies()) return showError(`Can't rename "${current}"`, `A saved reply named "${next}" exists.`), void (title.value = current);
+            saveReplies(Object.fromEntries(Object.entries(replies()).map(([k, v]) => (k === current ? [next, text.value] : [k, v]))));
+            current = next;
+            remove.title = remove.ariaLabel = `Delete ${next}`;
           };
           title.onchange = text.onchange = save;
-          const remove = h("button", { type: "button", class: "icon-button", title: `Delete ${name}`, ariaLabel: `Delete ${name}`, onclick: () => (saveReplies(Object.fromEntries(Object.entries(replies()).filter(([k]) => k !== name))), draw()) }, icon("trash"));
+          const remove = h("button", { type: "button", class: "icon-button", title: `Delete ${name}`, ariaLabel: `Delete ${name}`, onclick: () => (saveReplies(Object.fromEntries(Object.entries(replies()).filter(([k]) => k !== current))), draw()) }, icon("trash"));
           return h("div", { class: "pr-saved-reply" }, h("div", { class: "setting-control" }, title, remove), text);
         }),
       );

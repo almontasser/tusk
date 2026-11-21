@@ -78,15 +78,16 @@ export type Entry = { at: string; node: TimelineNode } | { at: string; commits: 
 export function entries(nodes: TimelineNode[]): Entry[] {
   const out: Entry[] = [];
   let at = "";
-  nodes.forEach((n, i) => {
+  const merges = new Set(nodes.filter((n) => n.type === "MergedEvent").map((n) => n.createdAt));
+  nodes.forEach((n) => {
     if (n.type === "PullRequestCommit" && n.commit) {
       const last = out[out.length - 1];
       if (last && "commits" in last) last.commits.push(n.commit);
       else out.push({ at: at || n.commit.committedDate, commits: [n.commit] });
       return;
     }
-    // GitHub records a merge as a merge and a close; it shows only the merge.
-    if (n.type === "ClosedEvent" && (nodes[i - 1]?.type === "MergedEvent" || nodes[i + 1]?.type === "MergedEvent")) return;
+    // GitHub records a merge as a merge and a close at the same time; it shows only the merge.
+    if (n.type === "ClosedEvent" && merges.has(n.createdAt)) return;
     at = n.submittedAt || n.createdAt || at;
     out.push({ at, node: n });
   });
@@ -198,14 +199,22 @@ export type EmojiImage = { name: string; url: string };
  * Names that aren't in `emojis` (name to image URL) stay as typed.
  */
 export function emojify(text: string, emojis: Record<string, string>): (string | EmojiImage)[] {
-  const out: (string | EmojiImage)[] = [""];
-  const pieces = text.split(/(?<![\w:]):([a-z0-9_+-]+):(?![\w:])/);
-  pieces.forEach((piece, i) => {
-    const url = i % 2 ? emojis[piece] : undefined;
-    const add = i % 2 === 0 ? piece : url ? (emojiText(url) ?? { name: piece, url }) : `:${piece}:`;
-    if (typeof add === "string" && typeof out[out.length - 1] === "string") out[out.length - 1] += add;
-    else out.push(add);
-  });
+  const out: (string | EmojiImage)[] = [];
+  const add = (p: string | EmojiImage) => (typeof p === "string" && typeof out[out.length - 1] === "string" ? (out[out.length - 1] += p) : out.push(p));
+  const pattern = /:([a-z0-9_+-]+):/g;
+  let from = 0;
+  for (let m; (m = pattern.exec(text)); ) {
+    const url = Object.hasOwn(emojis, m[1]) ? emojis[m[1]] : undefined;
+    // An unknown name's closing colon can open the next one, as in `:nope::tada:`.
+    if (!url) {
+      pattern.lastIndex = m.index + m[1].length + 1;
+      continue;
+    }
+    add(text.slice(from, m.index));
+    add(emojiText(url) ?? { name: m[1], url });
+    from = pattern.lastIndex;
+  }
+  add(text.slice(from));
   return out.filter((p) => p !== "");
 }
 

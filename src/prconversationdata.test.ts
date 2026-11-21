@@ -83,7 +83,8 @@ test("emojify replaces known shortcodes and leaves the rest", () => {
   const emojis = { "+1": "https://x/unicode/1f44d.png", octocat: "https://x/octocat.png", tada: "https://x/unicode/1f389.png" };
   assert.deepEqual(emojify("nice :+1: and :tada:!", emojis), ["nice 👍️ and 🎉️!"]);
   assert.deepEqual(emojify(":octocat: hi", emojis), [{ name: "octocat", url: "https://x/octocat.png" }, " hi"]);
-  assert.deepEqual(emojify("at 10:30:45 and :nope: and a:tada:b", emojis), ["at 10:30:45 and :nope: and a:tada:b"]);
+  // As GitHub renders them (checked with `gh api markdown`).
+  assert.deepEqual(emojify(":+1::tada: x:tada:y :nope::tada: 10:30:45 :constructor:", emojis), ["👍\uFE0F🎉\uFE0F x🎉\uFE0Fy :nope:🎉\uFE0F 10:30:45 :constructor:"]);
 });
 
 test("reactions toggle your own and keep counts", () => {
