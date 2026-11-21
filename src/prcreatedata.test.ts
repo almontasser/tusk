@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { autosaveKey, createArgs, defaultTemplate, existingFrom, headSpec, parseNumstat, remoteFor, repoFromUrl, templateChoices } from "./prcreatedata.ts";
+import { autosaveKey, createArgs, defaultTemplate, existingFrom, headSpec, headTarget, parseNumstat, remoteFor, repoFromUrl, templateChoices } from "./prcreatedata.ts";
 
 test("templates list the single file first as Default, then the folder's by name", () => {
   const t = templateChoices([".github/PULL_REQUEST_TEMPLATE/feature.md", ".github/PULL_REQUEST_TEMPLATE/bug.md", ".github/pull_request_template.md"]);
@@ -65,4 +65,11 @@ test("numstat reads plain files, renames, and binary files", () => {
     { path: "img.png", additions: 0, deletions: 0 },
   ]);
   assert.deepEqual(parseNumstat(""), []);
+});
+
+test("the head's remote is the upstream's only when it has the branch's name", () => {
+  assert.deepEqual(headTarget("fix"), { remote: "origin", branch: "fix" });
+  assert.deepEqual(headTarget("fix", "fork/fix"), { remote: "fork", branch: "fix" });
+  assert.deepEqual(headTarget("fix", "upstream/main"), { remote: "origin", branch: "fix" });
+  assert.deepEqual(headTarget("feature/x", "origin/feature/x"), { remote: "origin", branch: "feature/x" });
 });

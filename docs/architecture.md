@@ -4106,7 +4106,9 @@ remote URL parsing, the `--head` spec, the `gh pr create` arguments, and the
 numstat parser.
 
 - **Repositories.** The head repository is the one behind the branch's
-  upstream remote (`origin` without one), read with `gh repo view <url>`. The
+  upstream remote, read with `gh repo view <url>`. An upstream with another
+  branch name, such as `upstream/main` for a branch started from it, doesn't
+  count, so that branch, like one with no upstream, goes to `origin`. The
   base repository is its `parent` when it's a fork, else `gh`'s own. Every
   call after that names the base with `--repo`, `-R`, or `repos/OWNER/REPO`,
   since `{owner}/{repo}` resolves to `gh`'s default repository, not the

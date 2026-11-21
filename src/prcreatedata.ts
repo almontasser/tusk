@@ -42,6 +42,16 @@ export function remoteFor(remotes: string, repo: string): string | undefined {
 }
 
 /**
+ * The remote that holds the branch for the pull request: its upstream's, when the upstream is a branch of the same
+ * name. A branch started from `origin/main` or `upstream/main` tracks a branch it doesn't push to, so it goes to
+ * origin under its own name, as the push before creating does.
+ */
+export function headTarget(branch: string, upstream?: string): { remote: string; branch: string } {
+  const slash = upstream?.indexOf("/") ?? -1;
+  return upstream && slash > 0 && upstream.slice(slash + 1) === branch ? { remote: upstream.slice(0, slash), branch } : { remote: "origin", branch };
+}
+
+/**
  * The `--head` of a pull request: the branch alone in its own repository, or `owner:branch` from a fork, which
  * `gh pr create` needs to find the branch in another repository.
  */

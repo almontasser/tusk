@@ -12,7 +12,7 @@ import { writer } from "./prthreads";
 import { loadPullRequests, problemItem } from "./prlist";
 import { updateBranchPullRequest } from "./preditor";
 import { showPullRequest } from "./prpage";
-import { autosaveKey, createArgs, defaultTemplate, existingFrom, headSpec, parseNumstat, remoteFor, type Saved, TEMPLATE_PATHSPECS, templateChoices } from "./prcreatedata.ts";
+import { autosaveKey, createArgs, defaultTemplate, existingFrom, headSpec, headTarget, parseNumstat, remoteFor, type Saved, TEMPLATE_PATHSPECS, templateChoices } from "./prcreatedata.ts";
 
 // ---- Creating a pull request ----
 
@@ -54,9 +54,7 @@ export async function createPullRequest() {
   page.replaceChildren(el("p", "muted pr-loading", "Loading…"));
   showEditorView("New Pull Request", page, "git-pull-request-create", () => {});
   page.hidden = false;
-  // The branch's upstream remote holds the head; a branch with no upstream yet goes to origin, as the push does.
-  const headRemote = status.upstream?.split("/")[0] ?? "origin";
-  const headBranch = status.upstream ? status.upstream.slice(headRemote.length + 1) : branch;
+  const { remote: headRemote, branch: headBranch } = headTarget(branch, status.upstream);
   const key = autosaveKey(host.root(), branch);
   let remotes: string;
   let headRepo: Repo;
@@ -271,7 +269,7 @@ export async function createPullRequest() {
     const want = saved?.repo === repo && saved.base && names.includes(saved.base) ? saved.base : fallback;
     baseSelect.replaceChildren(...names.map((b) => new Option(b, b, false, b === want)));
     // gh pr list --head takes no owner, so it lists every fork's same-named branch; only the head's owner counts.
-    const open = await gh("pr", "list", "--repo", repo, "--head", headBranch, "--state", "open", "--json", "number,title,url,headRepositoryOwner")
+    const open = await gh("pr", "list", "--repo", repo, "--head", headBranch, "--state", "open", "--limit", "100", "--json", "number,title,url,headRepositoryOwner")
       .then((o) => existingFrom(JSON.parse(o) as { number: number; title: string; url: string; headRepositoryOwner: { login: string } }[], headRepo.owner.login), () => undefined);
     note.hidden = !open;
     create.disabled = !!open;
@@ -307,7 +305,7 @@ export async function createPullRequest() {
       mergeBase = mb.trim();
     }
     subjects = list.map(([, subject]) => subject);
-    commitsHeading.textContent = `${list.length} ${list.length === 1 ? "commit" : "commits"} into ${target}`;
+    commitsHeading.textContent = ref ? `${list.length} ${list.length === 1 ? "commit" : "commits"} into ${target}` : "Commits";
     const empty = ref ? "No commits between the branches yet." : `Add a remote for ${repoSelect.value} and fetch it to see the commits and files this pull request adds.`;
     commits.replaceChildren(
       ...(list.length ? list : [["", empty]]).map(([hash, subject, author, at]) => {
@@ -351,7 +349,7 @@ export async function createPullRequest() {
     try {
       // gh can't push for you without asking, so the branch goes up first, through the dialog for passwords.
       const s = gitStatus();
-      if (!s?.upstream || s.ahead > 0) {
+      if (s?.upstream !== `${headRemote}/${headBranch}` || s.ahead > 0) {
         if ((await gitTask(`Pushing ${branch}…`, ["push", "-u", headRemote, "HEAD"], `Can't push ${branch}`)) === undefined) return;
       }
       const args = createArgs({
@@ -383,7 +381,7 @@ export async function createPullRequest() {
     }
   };
   form.onkeydown = (e) => void (e.key === "Enter" && mod(e) && (e.preventDefault(), form.requestSubmit()));
-  form.append(heading, sub, note, orgWarning, title, titleWarning, templateRow, writer(body, known.get(repos[0])?.url ?? headRepo.url, 0), fields, buttons, commitsHeading, commits, filesHeading, files);
+  form.append(heading, sub, note, orgWarning, title, titleWarning, templateRow, writer(body, `${new URL(headRepo.url).origin}/${repos[0]}`, 0), fields, buttons, commitsHeading, commits, filesHeading, files);
   page.replaceChildren(form);
   await loadRepo();
   title.focus();
