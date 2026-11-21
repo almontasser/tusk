@@ -62,6 +62,17 @@ Selected**:
 The rest stays unstaged. In a diff from **Staged**, the button is **Unstage
 Selected**, and works the same way.
 
+Three toggles in every diff's header change how it looks: **Inline** shows both
+versions in one column, **Ignore whitespace** hides changes to whitespace at the
+start and end of lines (on by default), and **Collapse unchanged regions** folds
+the lines between changes. Tusk remembers your choice for every diff: changes,
+commits, stashes, branches, and pull requests. With whitespace ignored, Stage
+Selected doesn't see whitespace-only changes, so they stay unstaged.
+
+The diff of a PNG, JPEG, GIF, SVG, or WebP file shows the old and new pictures
+side by side, with their sizes, in place of text. Stash diffs show images as
+text.
+
 The editor marks lines that differ from the last commit in the gutter: green
 for added lines, blue for changed lines, and a gray triangle where lines were
 deleted. The markers update as you type. Click a marker to see the lines as
@@ -430,17 +441,30 @@ header has the checkbox too: tick **Viewed** when you've read a file, and the
 diff moves on to the next file you haven't viewed. Viewed files show ✓ in the
 diff's file list.
 
+To work through a large pull request:
+
+- Click **Next Unviewed**, or press V in the pull request's tab, to open the
+  first file you haven't viewed.
+- Tick **Hide viewed** to list only the files you haven't viewed yet. Tusk
+  remembers the choice.
+- Click **Mark All Viewed** to mark every file in the list as viewed on GitHub.
+  It asks first, because it changes each file's Viewed state on GitHub.
+
 Click a commit to see its own diff.
 
 After you've reviewed a pull request and its author pushed again, the Files
 tab offers **Since your review**, as GitHub's "changes since your last review":
-it lists only the files that changed after the commit you reviewed, and their
-diffs start from that commit. **All changes** goes back to the whole pull
-request.
+it lists only the files that the pull request changed after the commit you
+reviewed. When the author merged the base branch in, or rebased onto it, since
+your review, the diffs leave out the base branch's changes and show only the
+pull request's own. A file where the base's changes conflict with the version
+you reviewed shows its whole change since your review. **All changes** goes
+back to the whole pull request.
 
 With more than five files, the Files tab groups them under their folders, and
 with more than eight it has a box that filters them by path. Press ↓ in the box
-to move to the list.
+to move to the list. A pull request with more than 100 files or commits lists
+all of them.
 
 ### Conversation
 

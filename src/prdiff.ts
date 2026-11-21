@@ -2,6 +2,7 @@
 import { monaco } from "./editor";
 import { diffCursor, type DiffFile, git, gitFailure, gitOutput, gitStatus, refreshGit, showDiff, showDiffs } from "./git";
 import { suggestion } from "./gitparse";
+import { parseMergeTree, parseNumstat } from "./diffdata";
 import { showError, status, withProgress } from "./status";
 import { mod } from "./platform.ts";
 import { confirm } from "./palette";
@@ -105,7 +106,7 @@ export function showFileDiff(pr: Details, path: string, threads: Thread[], at?: 
     path: f.path,
     status: viewed?.get(f.path) ? "✓" : "",
     load: async (): Promise<[string, string]> => ["", ""],
-    show: () => showOneDiff(pr, f.path, threads, f.path === path ? at : undefined, since?.oid),
+    show: () => showOneDiff(pr, f.path, threads, f.path === path ? at : undefined, since?.oid, (f as { from?: string }).from),
     // Comment on File, and GitHub's Viewed checkbox for the file.
     extra: () => {
       const comment = el("button", "", "Comment on File");
@@ -148,18 +149,20 @@ export function showFileDiff(pr: Details, path: string, threads: Thread[], at?: 
 
 /**
  * Draws one file's diff with its threads, from the merge base to the head, or from `from`, the commit you last
- * reviewed. From there, the old side isn't the base's, so only threads on the new side show.
+ * reviewed. From there, the old side isn't the base's, so only threads on the new side show. `start` is the commit or
+ * tree the old side comes from, when it isn't `from` itself (see `sinceReview`).
  */
-async function showOneDiff(pr: Details, path: string, threads: Thread[], at?: { line: number | null; side: "LEFT" | "RIGHT" }, from?: string): Promise<boolean> {
+async function showOneDiff(pr: Details, path: string, threads: Thread[], at?: { line: number | null; side: "LEFT" | "RIGHT" }, from?: string, start = from): Promise<boolean> {
   let diff: monaco.editor.IStandaloneDiffEditor;
   let mergeBase: string;
   try {
     const slow = setTimeout(() => status(`Fetching #${pr.number}…`, "prs:progress"), 300);
     [mergeBase] = await Promise.all([prepareDiff(pr).finally(() => (clearTimeout(slow), status("", "prs:progress"))), loadMarkdown(), me()]);
     const show = (spec: string) => git("show", spec).catch(() => "");
-    const [original, modified] = await Promise.all([show(`${from ?? mergeBase}:${path}`), show(`${pr.headRefOid}:${path}`)]);
+    const images: [string, string] = [`${start ?? mergeBase}:${path}`, `${pr.headRefOid}:${path}`];
+    const [original, modified] = await Promise.all(images.map(show));
     const action = { label: "Comment on Line", title: "Comment on the selected lines, or reply to the comments on the cursor's line", run: () => commentAtCursor() };
-    diff = showDiff(path, original, modified, from ? `#${pr.number}: since your review (${from.slice(0, 7)})` : `#${pr.number}: ${pr.baseRefName} ↔ ${pr.headRefName}`, action);
+    diff = showDiff(path, original, modified, from ? `#${pr.number}: since your review (${from.slice(0, 7)})` : `#${pr.number}: ${pr.baseRefName} ↔ ${pr.headRefName}`, action, images);
     if (from) threads = threads.filter((t) => t.side === "RIGHT");
   } catch (e) {
     showError(`Can't show the diff`, e);
@@ -490,8 +493,11 @@ function commentForm() {
   return box;
 }
 
-/** The files that changed since the commit you last reviewed, with their line counts. */
-export type Since = { oid: string; files: { path: string; additions: number; deletions: number }[] };
+/**
+ * The files that changed since the commit you last reviewed, with their line counts. Each file's `from` is the
+ * commit or tree its diff starts from (see `sinceReview`).
+ */
+export type Since = { oid: string; files: { path: string; additions: number; deletions: number; from: string }[] };
 const sinceCache = new Map<string, Promise<Since>>();
 
 /** The commit of your latest submitted review, when the pull request's head has moved on since. */
@@ -501,32 +507,42 @@ export function lastReviewed(pr: Details): string | undefined {
 }
 
 /**
- * What changed between the commit you last reviewed and the head, as GitHub's "changes since your last review". A
- * force push can leave that commit out of the pull request's history, so it's fetched by ID when it isn't here.
+ * What the pull request itself changed between the commit you last reviewed and the head, as GitHub's "changes
+ * since your last review". A force push can leave that commit out of the pull request's history, so it's fetched by
+ * ID when it isn't here.
+ *
+ * When the author merged the base branch in (or rebased onto it) after your review, a plain diff from that commit
+ * also holds everyone else's work on the base. So the diff starts from your reviewed commit as if it had been made
+ * on today's base: `git merge-tree` replays the base's changes since the old fork point onto it, in a tree that
+ * isn't checked out or referenced. From that tree to the head, only the pull request's own changes remain. A file
+ * where the base's changes conflict with the reviewed version starts from the reviewed commit instead.
  */
 export function sinceReview(pr: Details, oid: string): Promise<Since> {
   const key = `${oid}..${pr.headRefOid}`;
   if (!sinceCache.has(key)) {
     const load = (async () => {
-      await prepareDiff(pr);
+      const baseNow = await prepareDiff(pr);
       const here = await git("cat-file", "-e", `${oid}^{commit}`).then(() => true, () => false);
       if (!here) {
         const { code, output } = await gitOutput(["fetch", "--no-tags", "origin", oid]);
         if (code) throw new Error(output);
       }
-      const out = await git("diff", "--numstat", "--no-renames", oid, pr.headRefOid);
-      // Only files the pull request changes: when the author merged the base branch in since your review, the
-      // diff also holds everyone else's work on the base, which isn't the pull request's.
-      const own = new Set(pr.files.map((f) => f.path));
-      const files = out
-        .split("\n")
-        .filter(Boolean)
-        .map((l) => {
-          const [a, d, ...path] = l.split("\t");
-          return { path: path.join("\t"), additions: Number(a) || 0, deletions: Number(d) || 0 };
-        })
-        .filter((f) => own.has(f.path));
-      return { oid, files };
+      const numstat = async (from: string, paths: string[] = []) => parseNumstat(await git("diff", "--numstat", "-z", "--no-renames", from, pr.headRefOid, ...(paths.length ? ["--", ...paths] : [])));
+      const baseThen = (await git("merge-base", oid, `refs/remotes/origin/${pr.baseRefName}`)).trim();
+      if (baseThen === baseNow) return { oid, files: (await numstat(oid)).map((f) => ({ ...f, from: oid })) };
+      // merge-tree exits with 1 when files conflict, which `git` treats as a failure, so it runs through gitOutput.
+      // An older git without --merge-base, or another failure, leaves the base's changes in the diffs, but lists
+      // only the files the pull request changes.
+      const merged = await gitOutput(["merge-tree", "--write-tree", "-z", "--name-only", "--no-messages", `--merge-base=${baseThen}`, oid, baseNow]);
+      const { tree, conflicts } = parseMergeTree(merged.output);
+      if (merged.code > 1 || !/^[0-9a-f]{40,64}$/.test(tree)) {
+        const own = new Set(pr.files.map((f) => f.path));
+        return { oid, files: (await numstat(oid)).filter((f) => own.has(f.path)).map((f) => ({ ...f, from: oid })) };
+      }
+      const conflicted = new Set(conflicts);
+      const clean = (await numstat(tree)).filter((f) => !conflicted.has(f.path)).map((f) => ({ ...f, from: tree }));
+      const rest = conflicts.length ? (await numstat(oid, conflicts)).map((f) => ({ ...f, from: oid })) : [];
+      return { oid, files: [...clean, ...rest].sort((a, b) => (a.path < b.path ? -1 : 1)) };
     })();
     sinceCache.set(key, load.catch((e) => (sinceCache.delete(key), Promise.reject(e))));
   }

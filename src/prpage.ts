@@ -7,6 +7,7 @@ import { listNav } from "./listnav";
 import { errorText, showError, status, withProgress } from "./status";
 import { showEditorView } from "./terminal";
 import { toast } from "./dom";
+import { confirm } from "./palette";
 import { isMac, mod } from "./platform.ts";
 import { $, avatar, DETAIL_FIELDS, type Details, el, gh, host, icon, labelRow, loadMarkdown, ltr, markdown, me, myLogin, openUrl, type Page, pages, repoUrl, type Section, statePill, type Thread, when } from "./prshared";
 import { commentBlock, expanded, lineComments, restTarget, reviewTarget, type Target, writer } from "./prthreads";
@@ -16,7 +17,7 @@ import { drawChecks } from "./prchecks";
 import { drawZones, lastReviewed, nextUnresolved, prepareDiff, replyTo, setResolved, setViewed, showFileDiff, shown, type Since, sinceReview, viewedFiles } from "./prdiff";
 import { deleteBranch, dequeue, editAssignees, editLabels, merge, mergeInfo, more, reRequestReview, requestReview, resolveConflicts, restoreBranch, revert, updateBranch } from "./practions";
 import { type MergeInfo, mergeActions, queueStates } from "./prmergedata";
-import { branchThreads, decorateComments, updateBranchPullRequest } from "./preditor";
+import { allFilesAndCommits, branchThreads, decorateComments, updateBranchPullRequest } from "./preditor";
 
 // ---- Details ----
 
@@ -92,7 +93,7 @@ export async function renderPullRequest(number: number) {
   let headCommit: string;
   try {
     [pr, threads, viewed, headCommit] = await Promise.all([
-      gh("pr", "view", String(number), "--json", DETAIL_FIELDS).then(JSON.parse),
+      gh("pr", "view", String(number), "--json", DETAIL_FIELDS).then(JSON.parse).then(allFilesAndCommits),
       lineComments(number),
       viewedFiles(number).catch(() => new Map<string, boolean>()),
       git("rev-parse", "HEAD").then((h) => h.trim(), () => ""),
@@ -480,6 +481,48 @@ export async function renderPullRequest(number: number) {
     const sum = (k: "additions" | "deletions") => list.reduce((n, f) => n + f[k], 0);
     totals.append(el("span", "added", `+${sum("additions")}`), " ", el("span", "deleted", `−${sum("deletions")}`));
     bar.append(totals, ...(viewed.size ? [progress, count] : []));
+    // Review tools, once GitHub says which files you viewed: hide the viewed ones, mark the rest viewed, and V
+    // opens the next file you haven't viewed.
+    const unviewed = () => list.filter((f) => viewed.has(f.path) && !viewed.get(f.path));
+    let hide = viewed.size > 0 && hideViewed.get();
+    if (viewed.size) {
+      const box = el("input");
+      box.type = "checkbox";
+      box.checked = hide;
+      box.onchange = () => (hide = box.checked, hideViewed.set(hide), draw(query));
+      const label = el("label", "pr-hide-viewed");
+      label.title = "Hide the files you've marked as viewed";
+      label.append(box, " Hide viewed");
+      const next = el("button", "", "Next Unviewed");
+      next.title = "Open the first file you haven't viewed (V)";
+      next.onclick = () => openNextUnviewed();
+      const all = el("button", "", "Mark All Viewed");
+      all.title = "Mark every file in this list as viewed on GitHub";
+      all.onclick = () => markAllViewed(all);
+      bar.append(label, next, all);
+    }
+    const markAllViewed = async (button: HTMLButtonElement) => {
+      const rest = unviewed();
+      if (!rest.length) return host.status("You've viewed every file in the list.");
+      if (!(await confirm(`Mark ${rest.length} ${rest.length === 1 ? "file" : "files"} of #${number} as viewed on GitHub?`, "Mark All Viewed"))) return;
+      button.disabled = true;
+      const failed: string[] = [];
+      // GitHub marks one file per request; a few at a time is quicker than one by one, without flooding it.
+      await withProgress(`Marking ${rest.length} files as viewed…`, async () => {
+        for (let i = 0; i < rest.length; i += 4)
+          await Promise.all(rest.slice(i, i + 4).map((f) => setViewed(pr.id, f.path, true).then(() => viewed.set(f.path, true), () => failed.push(f.path))));
+      });
+      if (failed.length) showError(`Can't mark ${failed.length} of ${rest.length} files as viewed`, failed.join("\n"));
+      else host.status(`Marked ${rest.length} files of #${number} as viewed.`);
+      if (entry!.section === "files") show("files");
+    };
+    const openNextUnviewed = () => {
+      if (!viewed.size) return host.status("GitHub didn't say which files you viewed.");
+      const next = unviewed()[0];
+      if (next) showFileDiff(pr, next.path, threads, undefined, since);
+      else host.status(`You've viewed all ${list.length} files of #${number}.`);
+    };
+    nextUnviewedKey(page, entry!, openNextUnviewed);
     const unresolved = threads.filter((t) => t.line && !t.resolved);
     if (unresolved.length) {
       const next = el("button", "link", `Go to Unresolved (${unresolved.length})`);
@@ -509,6 +552,7 @@ export async function renderPullRequest(number: number) {
             viewed.set(f.path, box.checked);
             li.classList.toggle("viewed", box.checked);
             countViewed();
+            if (hide) draw(query);
           } catch (e) {
             box.checked = !box.checked;
             showError("Can't change the file's Viewed state", e);
@@ -536,9 +580,11 @@ export async function renderPullRequest(number: number) {
     // Many files group under their folders, as in GitHub's file tree, and a box filters them by path.
     const grouped = list.length > 5;
     files.classList.toggle("grouped", grouped);
-    const draw = (query: string) => {
-      const q = query.trim().toLowerCase();
-      const shown = rows.filter((r) => r.path.toLowerCase().includes(q));
+    let query = "";
+    const draw = (text: string) => {
+      query = text;
+      const q = text.trim().toLowerCase();
+      const shown = rows.filter((r) => r.path.toLowerCase().includes(q) && !(hide && viewed.get(r.path)));
       if (!grouped) return files.replaceChildren(...shown.map((r) => r.li));
       const dirs = new Map<string, HTMLElement[]>();
       for (const r of shown) {
@@ -552,7 +598,7 @@ export async function renderPullRequest(number: number) {
           return [head, ...lis];
         }),
       );
-      if (!shown.length) files.replaceChildren(el("li", "muted", "No files match."));
+      if (!shown.length) files.replaceChildren(el("li", "muted", hide && !q ? "You've viewed every file." : "No files match."));
     };
     draw("");
     if (list.length > 8) {
@@ -643,6 +689,41 @@ function hunk(text: string) {
   const lines = text.split("\n").filter((l) => !l.startsWith("@@")).slice(-4);
   pre.append(...lines.map((l) => el("div", l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : "", l || " ")));
   return pre;
+}
+
+/** Whether the Files tab hides the files you viewed, kept in this computer's storage for every pull request. */
+const hideViewed = {
+  get: () => {
+    try {
+      return localStorage.getItem("pr-hide-viewed") === "1";
+    } catch {
+      return false;
+    }
+  },
+  set: (on: boolean) => {
+    try {
+      localStorage.setItem("pr-hide-viewed", on ? "1" : "0");
+    } catch {
+      // Storage is off; the choice lasts until the tab redraws.
+    }
+  },
+};
+
+/** What V does in each pull request's tab: the latest Files tab's "open the next file you haven't viewed". */
+const nextUnviewed = new WeakMap<HTMLElement, () => void>();
+
+/**
+ * Makes V in the pull request's tab, while it shows the Files tab and you aren't typing, run `open`. The tab's
+ * element outlives its redraws, so it gets one listener, which runs the latest Files tab's function.
+ */
+function nextUnviewedKey(page: HTMLElement, entry: Page, open: () => void) {
+  if (!nextUnviewed.has(page))
+    page.addEventListener("keydown", (e) => {
+      if (e.key.toLowerCase() !== "v" || e.metaKey || e.ctrlKey || e.altKey || entry.section !== "files" || (e.target as HTMLElement).closest("input, textarea, select, [contenteditable]")) return;
+      e.preventDefault();
+      nextUnviewed.get(page)?.();
+    });
+  nextUnviewed.set(page, open);
 }
 
 /** A small bar of added and removed lines, as in GitHub's file list. */
