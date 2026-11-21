@@ -10066,3 +10066,16 @@ user code:
   the branch through the same password dialog as other pushes.
 - The tab redraws whole when checks change, rather than only the checks list,
   so the status box and counts never disagree with the list.
+
+### 2026-11-21: Pull request modules and a tab per pull request
+
+- The pull request code is split into flat `pr*.ts` modules in a strict layer
+  order, rather than a folder, to match the repo and the `src/*.test.ts` glob.
+  The few calls that go up the order go through `hub`, which `prs.ts` fills in
+  at startup, so no modules import each other in a cycle.
+- Each pull request opens in its own tab with its own element, and its state
+  lives in `pages`. The sidebar marks every open pull request rather than
+  tracking which tab is in front. Pending reviews are kept per pull request in
+  `latestLoads`, where only the latest load stores its value, because hidden
+  tabs now refresh too and a single global let one pull request's review stand
+  in for another's.
