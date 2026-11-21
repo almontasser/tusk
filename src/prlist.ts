@@ -2,7 +2,7 @@
 import { checksSummary } from "./gitparse";
 import { errorText } from "./status";
 import { openTerminal } from "./terminal";
-import { $, checkIcon, el, gh, host, hub, icon, labelChip, LIST_FIELDS, type ListedPullRequest, me, myLogin, openUrl, reviews, when } from "./prshared";
+import { $, checkIcon, el, gh, host, hub, icon, labelChip, LIST_FIELDS, type ListedPullRequest, me, myLogin, openUrl, pages, reviews, when } from "./prshared";
 
 // ---- List ----
 
@@ -116,7 +116,7 @@ function prRow(pr: ListedPullRequest, seenAt: Record<string, string> = {}) {
   li.role = "option";
   li.dataset.key = String(pr.number);
   li.dataset.label = pr.title;
-  li.classList.toggle("open", hub.openNumber === pr.number);
+  li.classList.toggle("open", pages.has(pr.number));
   const kind = pr.state === "MERGED" ? ["git-merge", "merged"] : pr.state === "CLOSED" ? ["git-pull-request-closed", "closed"] : pr.isDraft ? ["git-pull-request-draft", "draft"] : ["git-pull-request", "open"];
   const state = icon(kind[0], `pr-row-state ${kind[1]}`);
   state.title = kind[1][0].toUpperCase() + kind[1].slice(1);
@@ -141,5 +141,5 @@ function prRow(pr: ListedPullRequest, seenAt: Record<string, string> = {}) {
   return li;
 }
 
-/** Marks the open pull request in the sidebar list. */
-export const markOpenRow = () => $("pr-list").querySelectorAll<HTMLElement>("li.pr").forEach((li) => li.classList.toggle("open", li.dataset.key === String(hub.openNumber)));
+/** Marks every pull request that has a tab open in the sidebar list, not only the tab in front. */
+export const markOpenRows = () => $("pr-list").querySelectorAll<HTMLElement>("li.pr").forEach((li) => li.classList.toggle("open", pages.has(Number(li.dataset.key))));

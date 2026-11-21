@@ -174,17 +174,24 @@ export let myLogin = "";
 let loginLookup: Promise<unknown> | undefined;
 export const me = () => (loginLookup ??= gh("api", "user", "--jq", ".login").then((l) => (myLogin = l.trim()), () => (loginLookup = undefined)));
 
+export type Section = "conversation" | "commits" | "checks" | "files";
 /**
- * What the pull request modules share without importing each other in a cycle: state the page sets and lower
- * modules read, and the page's functions that lower modules call. prs.ts sets the functions at startup.
+ * A pull request open in its own editor tab. `el` is the tab's element, made when the tab opens and removed when
+ * it closes. `section` is the section it shows, `participants` the people in it (author, reviewers, commenters),
+ * suggested first after "@", and `viewed` its files' Viewed states, shared with its diff's Viewed checkbox.
+ */
+export type Page = { el: HTMLElement; section: Section; participants: string[]; viewed?: Map<string, boolean> };
+/**
+ * The pull requests open in editor tabs, by number. A project switch closes them all, so numbers from two
+ * projects never mix here.
+ */
+export const pages = new Map<number, Page>();
+
+/**
+ * The page's functions that lower modules call, so modules don't import each other in a cycle. prs.ts sets them
+ * at startup.
  */
 export const hub = {
-  /** The pull request open in the editor tab. */
-  openNumber: undefined as number | undefined,
-  /** The Viewed states of the pull request open in its tab, shared with its diff's Viewed checkbox. */
-  viewedOf: undefined as { number: number; files: Map<string, boolean> } | undefined,
-  /** People in the pull request on screen (author, reviewers, commenters), suggested first after "@". */
-  participants: [] as string[],
   showPullRequest: undefined as unknown as (number: number, title?: string) => unknown,
   renderPullRequest: undefined as unknown as (number: number) => Promise<void>,
   threadsChanged: undefined as unknown as (number: number) => Promise<void>,

@@ -636,7 +636,7 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 /* A panel tab moved into an editor pane covers the pane's editor, under the drop marks. */
 /* Borders rather than padding, since xterm's fit measures the element's content box. */
 .pane-editor > .docked { position: absolute; inset: 0; z-index: 9; border: solid var(--bg); border-width: 6px 0 0 10px; background: var(--bg); overflow: hidden; }
-.pane-editor > .docked:is(#diff, #merge, #problem-page, #history, #pr-detail) { border-width: 0; }
+.pane-editor > .docked:is(#diff, #merge, #problem-page, #history, .pr-page) { border-width: 0; }
 
 /* ==========================================================================
    Commit view
@@ -765,9 +765,9 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .checks-skipped, .checks-none { color: var(--faint); }
 
 /* The pull request's editor tab. */
-.pane-editor > #pr-detail.docked { overflow: auto; background: var(--bg); container-type: inline-size; }
-#pr-detail:focus { outline: none; }
-#pr-detail > * { max-width: 1180px; margin-left: auto; margin-right: auto; }
+.pane-editor > .pr-page.docked { overflow: auto; background: var(--bg); container-type: inline-size; }
+.pr-page:focus { outline: none; }
+.pr-page > * { max-width: 1180px; margin-left: auto; margin-right: auto; }
 .pr-loading { padding: 24px; }
 .pr-head { display: flex; gap: 16px; align-items: flex-start; padding: 20px 24px 14px; border-bottom: 1px solid var(--border-subtle); }
 .pr-head-main { flex: 1; min-width: 0; }
@@ -876,8 +876,8 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .pr-path .file { font-weight: 500; }
 .pr-files li.viewed .pr-path { opacity: 0.5; }
 .pr-files input[type="checkbox"] { margin: 0; flex-shrink: 0; }
-#pr-detail .added { color: var(--green); font-variant-numeric: tabular-nums; }
-#pr-detail .deleted { color: var(--red); font-variant-numeric: tabular-nums; }
+.pr-page .added { color: var(--green); font-variant-numeric: tabular-nums; }
+.pr-page .deleted { color: var(--red); font-variant-numeric: tabular-nums; }
 .pr-file-comments { color: var(--faint); white-space: nowrap; }
 .pr-file-comments.unresolved { color: var(--yellow); }
 .pr-diffbar { display: inline-flex; gap: 1px; }

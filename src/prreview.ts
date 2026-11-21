@@ -1,5 +1,6 @@
 // Pull requests: your pending review on GitHub, and adding, deleting, and submitting its comments.
 import { invoke } from "@tauri-apps/api/core";
+import { latestLoads } from "./prdata";
 import { type Details, gh, host, type ReviewComment } from "./prshared";
 
 /**
@@ -7,19 +8,19 @@ import { type Details, gh, host, type ReviewComment } from "./prshared";
  * browser and here. `id` is its REST ID and `node` its GraphQL ID.
  */
 type Pending = { number: number; id: number; node: string; comments: ReviewComment[] };
-/** The pending review of the pull request on screen, or null when you have none there. */
-export let pending: Pending | null = null;
-
+/**
+ * Your pending review of each pull request, by project and number. Several pull request tabs load theirs at once,
+ * and only a pull request's latest load stores its value, so one pull request's review never stands in for
+ * another's, and a slow load never undoes a newer one.
+ */
+const pendings = latestLoads<Pending | null>(null);
+const key = (number: number) => `${host.root()}\0${number}`;
+/** Your pending review of a pull request as last loaded, or null when you have none there. */
+export const pendingReview = (number: number) => pendings.get(key(number));
+/** The latest load of a pull request's pending review, finished or not, so callers share it rather than ask again. */
+export const pendingOf = (number: number) => pendings.latest(key(number), () => readPending(number));
 /** Loads your pending review of a pull request. GitHub lists a pending review only to its author. */
-/** The last load of a pull request's pending review, finished or not, so callers share it rather than ask again. */
-let pendingLoad: { number: number; done: Promise<Pending | null> } | undefined;
-export const pendingOf = (number: number) => (pendingLoad?.number === number ? pendingLoad.done : loadPending(number));
-
-export function loadPending(number: number): Promise<Pending | null> {
-  const done = readPending(number);
-  pendingLoad = { number, done: done.catch(() => null) };
-  return done;
-}
+export const loadPending = (number: number) => pendings.load(key(number), () => readPending(number));
 
 // ponytail: the first 100 pending comments and threads; a review with more shows the rest without their side.
 const PENDING = `query($id: ID!) { node(id: $id) { ... on PullRequestReview {
@@ -29,14 +30,14 @@ const PENDING = `query($id: ID!) { node(id: $id) { ... on PullRequestReview {
 
 async function readPending(number: number): Promise<Pending | null> {
   const found = (await gh("api", `repos/{owner}/{repo}/pulls/${number}/reviews`, "--paginate", "--jq", '.[] | select(.state == "PENDING") | {id, node: .node_id}')).trim();
-  if (!found) return (pending = null);
+  if (!found) return null;
   const { id, node } = JSON.parse(found.split("\n")[0]);
   // REST lists a pending comment with only its diff position, no line, so its lines come from GraphQL, and its
   // side from its thread.
   const jq = `.data.node as $r | ($r.pullRequest.reviewThreads.nodes | map(.diffSide as $s | .comments.nodes[] | {key: (.databaseId | tostring), value: $s}) | from_entries) as $sides
     | $r.comments.nodes[] | {id: .databaseId, path, line: (.line // .originalLine), start_line: .startLine, side: ($sides[.databaseId | tostring] // "RIGHT"), body, user: .author.login, in_reply_to_id: .replyTo.databaseId, created_at: .createdAt}`;
   const out = await gh("api", "graphql", "-f", `query=${PENDING}`, "-f", `id=${node}`, "--jq", jq);
-  return (pending = { number, id, node, comments: out.split("\n").filter(Boolean).map((l) => JSON.parse(l)) });
+  return { number, id, node, comments: out.split("\n").filter(Boolean).map((l) => JSON.parse(l)) };
 }
 
 /** A pending comment's place: its lines and side, as GitHub's REST API names them. */
@@ -47,8 +48,9 @@ type Place = { path: string; line: number; side: "LEFT" | "RIGHT"; start_line?: 
  * can only add comments while creating a review, so later ones go through GraphQL's addPullRequestReviewThread.
  */
 export async function addPending(pr: Details, place: Place, body: string) {
-  await pendingOf(pr.number);
-  if (!pending) {
+  // This pull request's own review: the value its load returns, never what another pull request's load stored.
+  const review = await pendingOf(pr.number);
+  if (!review) {
     const comment = { path: place.path, line: place.line, side: place.side, body, ...(place.start_line ? { start_line: place.start_line, start_side: place.side } : {}) };
     await invoke<string>("run_capture", {
       cwd: host.root(),
@@ -62,7 +64,7 @@ export async function addPending(pr: Details, place: Place, body: string) {
     await gh(
       "api", "graphql",
       "-f", "query=mutation($review: ID!, $path: String!, $body: String!, $line: Int!, $side: DiffSide!, $startLine: Int, $startSide: DiffSide) { addPullRequestReviewThread(input: { pullRequestReviewId: $review, path: $path, body: $body, line: $line, side: $side, startLine: $startLine, startSide: $startSide }) { thread { id } } }",
-      "-f", `review=${pending.node}`, "-f", `path=${place.path}`, "-f", `body=${body}`, "-F", `line=${place.line}`, "-f", `side=${place.side}`, ...range,
+      "-f", `review=${review.node}`, "-f", `path=${place.path}`, "-f", `body=${body}`, "-F", `line=${place.line}`, "-f", `side=${place.side}`, ...range,
     );
   }
   await loadPending(pr.number);
@@ -74,15 +76,15 @@ export async function deletePending(number: number, comment: ReviewComment) {
   const review = await loadPending(number);
   if (review && !review.comments.length) {
     await gh("api", "--method", "DELETE", `repos/{owner}/{repo}/pulls/${number}/reviews/${review.id}`);
-    pending = null;
+    pendings.set(key(number), null);
   }
 }
 
 /** Submits a review: the pending comments, with a summary and a verdict, in one request. */
 export async function submitReview(pr: Details, event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) {
-  const review = pending?.number === pr.number ? pending : await loadPending(pr.number);
+  const review = pendingReview(pr.number) ?? (await loadPending(pr.number));
   // Your pending review is submitted with the verdict; without one, a review with only the summary is created.
   const [path, payload] = review ? [`reviews/${review.id}/events`, { event, body }] : ["reviews", { commit_id: pr.headRefOid, event, body }];
   await invoke<string>("run_capture", { cwd: host.root(), program: "gh", args: ["api", "--method", "POST", `repos/{owner}/{repo}/pulls/${pr.number}/${path}`, "--input", "-"], input: JSON.stringify(payload) });
-  pending = null;
+  pendings.set(key(pr.number), null);
 }

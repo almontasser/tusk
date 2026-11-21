@@ -3792,8 +3792,9 @@ modules above it in this list, so there are no import cycles:
 
 | Module | What's in it |
 |---|---|
-| `prshared.ts` | The types (`PullRequest`, `Details`, `Thread`, `Host`), the field lists, `host`, `gh`, `markdown`, the small DOM helpers (`el`, `icon`, `avatar`, `when`, `ltr`, labels), `me()` and `myLogin`, and `hub` |
+| `prshared.ts` | The types (`PullRequest`, `Details`, `Thread`, `Host`), the field lists, `host`, `gh`, `markdown`, the small DOM helpers (`el`, `icon`, `avatar`, `when`, `ltr`, labels), `me()` and `myLogin`, the open tabs (`pages`), and `hub` |
 | `prthreads.ts` | Line threads (`lineComments`), editing and deleting your own comments (`commentBlock`, `Target`), and the comment box (`writer`, `mentions`) |
+| `prdata.ts` | Data code with no DOM or Tauri, which `prdata.test.ts` tests: `latestLoads` |
 | `prreview.ts` | Your pending review: loading it, adding and deleting its comments, and submitting it |
 | `prlist.ts` | The sidebar list, its review queue sections, the new-activity marks, and `problemItem` |
 | `prchecks.ts` | The Checks section (`drawChecks`), failed job logs, and links to project files in them |
@@ -3808,11 +3809,43 @@ A few calls go up the list: a list row and the status bar button open a pull
 request, the checks, actions, and diff redraw its page, and the diff reloads
 threads everywhere. They go through `hub` in `prshared.ts`, whose
 `showPullRequest`, `renderPullRequest`, and `threadsChanged` `prs.ts` sets at
-startup. `hub` also holds the page's state that lower modules read. `preditor.ts`
-registers the Monaco listeners and the `tusk.prs.openThread` command when it
-loads; `prs.ts` imports it, so they run once at startup. A module that only
-builds on these, such as a new section, goes between the modules it uses and
-the ones that use it.
+startup. `preditor.ts` registers the Monaco listeners and the
+`tusk.prs.openThread` command when it loads; `prs.ts` imports it, so they run
+once at startup. A module that only builds on these, such as a new section,
+goes between the modules it uses and the ones that use it.
+
+#### Per-pull-request state
+
+Several pull requests can be open at once, each in its own editor tab, so
+nothing about "the pull request on screen" is a single global. `pages` in
+`prshared.ts` maps each open pull request's number to its `Page`: the tab's own
+element (`.pr-page`, made by `showPullRequest` and removed when the tab
+closes), its `section`, its `participants` for `@` suggestions, and its
+files' `viewed` states, which its diff's Viewed checkbox shares. Opening a pull
+request that has a tab brings that tab to the front and loads it again.
+`renderPullRequest` does nothing without a tab, and after each `await` it stops
+if the tab closed meanwhile. Each tab's keys, scroll position, and live refresh
+are its own; `watchPullRequest` stops once its tab's entry in `pages` is gone or
+the tab has drawn again, and only an edit form or a focused comment box in its
+own tab holds its redraw. The sidebar marks every pull request that has a tab,
+not only the one in front, since that needs no hook into tab activation. A
+project switch closes the editor-only views, which closes every pull request
+tab, so `pages` never mixes two projects' numbers.
+
+Hidden tabs refresh too, so two pull requests' requests can finish in any
+order. Your pending review is kept per pull request (and project) in a
+`latestLoads` store from `prdata.ts`: a load stores its value only while it's
+still that pull request's latest, and `set` after a submit or a delete makes
+loads still on their way out of date. `pendingReview(number)` reads it for
+drawing, and `addPending`, `replyTo`, and `submitReview` use the review of the
+pull request they act on, as its load returned it. Before, one global held the
+last review any load returned, so with two tabs a comment could join the other
+pull request's review.
+
+The diff editor is one shared editor, so `shown` (the diff on screen) and
+`form` (its comment form) stay single. Both carry their pull request, and
+`threadsChanged` redraws the diff only when it shows the pull request whose
+threads changed.
 
 #### Markdown, comments, and the diff
 
@@ -3913,9 +3946,9 @@ since they were short-lived.
 The conversation is one timeline, oldest first, as on GitHub: the description,
 then reviews (`submittedAt`), comments (`createdAt`), and line comment threads
 (their first comment's `created_at`), sorted together, each with its age (`3h
-ago`, from `age` in `gitparse.ts`) and the full date on hover. Refreshing the
-pull request on screen, such as after you post a comment, leaves it in place
-until the new version is ready; only another pull request shows "Loading…".
+ago`, from `age` in `gitparse.ts`) and the full date on hover. Refreshing a
+pull request's tab, such as after you post a comment, leaves it in place until
+the new version is ready; only a new tab shows "Loading…".
 
 `markdown()` turns `#123` and `@name` in text into links after sanitizing,
 walking the text nodes and skipping links and code, so a reference inside a
@@ -3946,11 +3979,12 @@ It makes a network call, so it doesn't run on every refresh.
 
 #### The pull request tab
 
-A pull request opens in an editor tab: `showPullRequest` moves `#pr-detail` out
-of the sidebar with `showEditorView`, and the sidebar keeps the list.
-`renderPullRequest` draws the tab without focusing it, so a refresh after an
-action never pulls you out of a diff. It keeps the open section (`section`),
-the scroll position, and the comment box's text (`drafts`) across the redraw.
+A pull request opens in its own editor tab: `showPullRequest` makes a `.pr-page`
+element for it and shows it with `showEditorView`, and the sidebar keeps the
+list. `renderPullRequest` draws the tab without focusing it, so a refresh after
+an action never pulls you out of a diff. It keeps the open section (the page's
+`section`), the scroll position, and the comment box's text (`drafts`) across
+the redraw.
 The layout is a header row, then a grid of the main column (section tabs and
 the section) and a side column (the status box, reviewers, and labels). A
 container query turns it into one column under 760 pixels, for a split pane.
@@ -3960,7 +3994,7 @@ fall back to the login's initial when they don't load.
 Line threads in the conversation show the end of their `diff_hunk` from the
 REST comments, as GitHub does above a review comment. The diff's Viewed
 checkbox is a `DiffFile.extra` control, which `showDiffs` in `git.ts` adds after
-its file list. It shares the tab's Viewed map (`viewedOf`), and checking it
+its file list. It shares the tab's Viewed map (the page's `viewed`), and checking it
 moves to the next unviewed file with `showDiffs`.
 
 `createPullRequest` opens a form in its own editor tab. It reads the default
@@ -4047,9 +4081,9 @@ check runs, GitHub's merge state is `UNKNOWN`, or the pull request is under two
 minutes old (a new one has no checks queued yet), `watchPullRequest` reads `statusCheckRollup` and
 `mergeStateStatus` every 15 seconds and redraws the whole tab when either
 changes, which keeps the status box and the counts current too. The redraw keeps
-the section, scroll, and draft, and it waits while the tab is hidden, a comment
-is being edited, or the comment box has focus. It stops once the tab shows
-another pull request or a newer drawing of this one.
+the section, scroll, and draft, and it waits while a comment in the tab is being
+edited or the tab's comment box has focus. It stops once the tab closes or
+draws again.
 
 The Viewed checkboxes are GitHub's own (`viewerViewedState` on the pull
 request's `files` in GraphQL, changed by `markFileAsViewed` and

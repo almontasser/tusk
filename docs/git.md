@@ -273,8 +273,12 @@ list, without a search, is split into a review queue: **Waiting for your
 review**, **Yours**, and **Everyone else**. The list shows 50 at a time; **Load More** at the end shows 50 more. If the GitHub CLI isn't installed, or
 you aren't logged in, the tab says so and offers to fix it.
 
-Click a pull request to open it in an editor tab, beside your files; the list
-marks the one that's open. The header shows the title, the state (Open, Draft,
+Click a pull request to open it in an editor tab, beside your files. Each pull
+request opens in its own tab, so you can keep several open at once and switch
+between them; clicking one that's already open brings its tab to the front. The
+list marks every pull request that has a tab open. Each tab keeps its own
+section, scroll position, and unsent comment, and keeps watching its checks
+while it's in the background. The header shows the title, the state (Open, Draft,
 Merged, or Closed), the author, the branches (click one to copy its name), and
 the buttons: **Refresh**, **Open in Browser**, **More Actions**, **Check Out**,
 and **Merge…**. Tabs switch between **Conversation**, **Commits**, **Checks**,

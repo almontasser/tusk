@@ -8,10 +8,10 @@ import { errorText, showError, status, withProgress } from "./status";
 import { showEditorView } from "./terminal";
 import { toast } from "./dom";
 import { isMac, mod } from "./platform.ts";
-import { $, avatar, DETAIL_FIELDS, type Details, el, gh, host, hub, icon, labelRow, loadMarkdown, ltr, markdown, me, myLogin, openUrl, repoUrl, statePill, type Thread, when } from "./prshared";
-import { commentBlock, editing, expanded, lineComments, restTarget, reviewTarget, type Target, writer } from "./prthreads";
-import { deletePending, loadPending, pending, submitReview } from "./prreview";
-import { loadPullRequests, markOpenRow, markSeen, problemItem } from "./prlist";
+import { $, avatar, DETAIL_FIELDS, type Details, el, gh, host, icon, labelRow, loadMarkdown, ltr, markdown, me, myLogin, openUrl, type Page, pages, repoUrl, type Section, statePill, type Thread, when } from "./prshared";
+import { commentBlock, expanded, lineComments, restTarget, reviewTarget, type Target, writer } from "./prthreads";
+import { deletePending, loadPending, pendingReview, submitReview } from "./prreview";
+import { loadPullRequests, markOpenRows, markSeen, problemItem } from "./prlist";
 import { drawChecks } from "./prchecks";
 import { drawZones, lastReviewed, nextUnresolved, prepareDiff, replyTo, setResolved, setViewed, showFileDiff, shown, type Since, sinceReview, viewedFiles } from "./prdiff";
 import { editAssignees, editLabels, merge, more, requestReview, updateBranch } from "./practions";
@@ -19,9 +19,6 @@ import { branchThreads, decorateComments, updateBranchPullRequest } from "./pred
 
 // ---- Details ----
 
-type Section = "conversation" | "commits" | "checks" | "files";
-/** The section the open pull request's tab shows. A refresh keeps the section and scroll. */
-let section: Section = "conversation";
 /**
  * What you typed in the comment box, by pull request, kept in this computer's storage per project, so a refresh,
  * closing the tab, or restarting the app keeps it until you send it.
@@ -55,27 +52,39 @@ const drafts = {
 /** Pull requests whose Files tab shows only the changes since your last review. */
 const sinceMode = new Set<number>();
 
-/** Opens a pull request in its editor tab. */
+/**
+ * Opens a pull request in its own editor tab, beside the tabs of other pull requests, or brings its tab to the
+ * front when it's open already. Either way it loads the pull request again.
+ */
 export function showPullRequest(number: number, title = "") {
-  const page = $("pr-detail");
-  if (hub.openNumber !== number) section = "conversation";
-  hub.openNumber = number;
-  showEditorView(title ? `#${number} ${title}` : `#${number}`, page, "git-pull-request", () => {
-    hub.openNumber = undefined;
-    markOpenRow();
+  let entry = pages.get(number);
+  if (!entry) {
+    entry = { el: el("div", "pr-page"), section: "conversation", participants: [] };
+    entry.el.replaceChildren(el("p", "muted pr-loading", "Loading…"));
+    pages.set(number, entry);
+  }
+  const tab = entry;
+  showEditorView(title ? `#${number} ${title}` : `#${number}`, tab.el, "git-pull-request", () => {
+    // Closing the tab parks its element in the document; this pull request's tab is gone for good.
+    tab.el.remove();
+    if (pages.get(number) === tab) pages.delete(number);
+    markOpenRows();
   });
-  page.hidden = false;
-  markOpenRow();
+  tab.el.hidden = false;
+  markOpenRows();
   return renderPullRequest(number);
 }
 
-/** Loads a pull request and draws its tab, keeping the tab's section, scroll, and comment draft. */
+/**
+ * Loads a pull request and draws its tab, keeping the tab's section, scroll, and comment draft. Does nothing when
+ * the pull request has no tab, and stops when its tab closes while it loads.
+ */
 export async function renderPullRequest(number: number) {
+  const entry = pages.get(number);
+  if (!entry) return;
   const libraries = loadMarkdown();
-  const page = $("pr-detail");
-  // Refreshing the same pull request, such as after you comment, keeps it on screen until the new version is ready.
-  if (page.dataset.number !== String(number)) page.replaceChildren(el("p", "muted pr-loading", "Loading…"));
-  page.dataset.number = String(number);
+  // Refreshing, such as after you comment, keeps the pull request on screen until the new version is ready.
+  const page = entry.el;
   let pr: Details;
   let threads: Thread[];
   let viewed: Map<string, boolean>;
@@ -90,16 +99,17 @@ export async function renderPullRequest(number: number) {
       loadPending(number).catch(() => null),
     ]);
   } catch (e) {
+    if (pages.get(number) !== entry) return;
     const list = el("ul", "pr-checks");
     list.append(problemItem(`Can't load #${number}`, e, () => renderPullRequest(number)));
     page.replaceChildren(list);
     return;
   }
   await libraries;
-  if (page.dataset.number !== String(number)) return; // Another pull request opened meanwhile.
-  hub.viewedOf = { number, files: viewed };
+  if (pages.get(number) !== entry) return; // The tab closed meanwhile.
+  entry.viewed = viewed;
   markSeen(number, pr.updatedAt);
-  hub.participants = [...new Set([pr.author.login, ...pr.latestReviews.map((r) => r.author.login), ...pr.comments.map((c) => c.author.login), ...threads.flatMap((t) => t.comments.map((c) => c.user)), ...pr.assignees.map((a) => a.login)])];
+  entry.participants = [...new Set([pr.author.login, ...pr.latestReviews.map((r) => r.author.login), ...pr.comments.map((c) => c.author.login), ...threads.flatMap((t) => t.comments.map((c) => c.user)), ...pr.assignees.map((a) => a.login)])];
   const open = pr.state === "OPEN";
   const reload = () => renderPullRequest(number);
   // Runs a `gh` command that changes the pull request, then shows it again.
@@ -178,7 +188,7 @@ export async function renderPullRequest(number: number) {
     files: () => fileTab(),
   };
   const show = (s: Section) => {
-    section = s;
+    entry.section = s;
     tabs.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.section === s)));
     body.replaceChildren(...sections[s]());
   };
@@ -215,7 +225,7 @@ export async function renderPullRequest(number: number) {
     // A comment you can edit or delete when it's yours; it redraws in place while you do.
     const editable = (user: string, body: string, target: Target, at: string, label = "") => {
       const card = el("div", "pr-comment");
-      const draw = () => card.replaceChildren(...commentBlock(user, body, target, repo, draw, reload, at, label));
+      const draw = () => card.replaceChildren(...commentBlock(number, user, body, target, repo, draw, reload, at, label));
       draw();
       const row = el("div", "pr-event");
       row.append(avatar(user, repo, 28), card);
@@ -242,7 +252,7 @@ export async function renderPullRequest(number: number) {
       if (t.diff_hunk) box.append(hunk(t.diff_hunk));
       const comments = t.comments.map((c) => {
         const card = el("div", "pr-thread-comment");
-        const draw = () => card.replaceChildren(...commentBlock(c.user, c.body, restTarget(`repos/{owner}/{repo}/pulls/comments/${c.id}`), repo, draw, reload, c.created_at));
+        const draw = () => card.replaceChildren(...commentBlock(number, c.user, c.body, restTarget(`repos/{owner}/{repo}/pulls/comments/${c.id}`), repo, draw, reload, c.created_at));
         draw();
         return card;
       });
@@ -254,7 +264,7 @@ export async function renderPullRequest(number: number) {
         footer.append(b);
       };
       if (t.line || t.node) {
-        link(pending?.number === number && t.node ? "Reply (joins your review)" : "Reply", () => {
+        link(pendingReview(number) && t.node ? "Reply (joins your review)" : "Reply", () => {
           const form = el("div", "pr-thread-reply");
           const text = el("textarea");
           text.placeholder = `Reply to ${t.user} (Markdown)`;
@@ -272,7 +282,7 @@ export async function renderPullRequest(number: number) {
             if (e.key === "Enter" && mod(e)) send.click();
             if (e.key === "Escape") cancel.click();
           };
-          form.append(writer(text, repo), buttons);
+          form.append(writer(text, repo, number), buttons);
           footer.replaceWith(form);
           text.focus();
         });
@@ -316,8 +326,9 @@ export async function renderPullRequest(number: number) {
 
   /** The comment box, with your pending review's comments above it, kept at the bottom of the conversation. */
   function composer() {
-    const hasPending = pending?.number === number;
-    const pendingComments = hasPending ? pending!.comments : [];
+    const review = pendingReview(number);
+    const hasPending = !!review;
+    const pendingComments = review?.comments ?? [];
     const box = el("div", "pr-composer");
     if (pendingComments.length) {
       const list = el("ul", "pr-pending");
@@ -380,7 +391,7 @@ export async function renderPullRequest(number: number) {
     text.onkeydown = (e) => void (e.key === "Enter" && mod(e) && buttons.querySelector<HTMLButtonElement>("button.primary")!.click());
     const hint = el("span", "muted pr-hint", `${isMac ? "⌘" : "Ctrl+"}⏎ to ${hasPending ? "submit" : "comment"}`);
     buttons.prepend(hint);
-    box.append(writer(text, repo), buttons);
+    box.append(writer(text, repo, number), buttons);
     return box;
   }
 
@@ -590,13 +601,12 @@ export async function renderPullRequest(number: number) {
   }
 
   // ---- Put it together, keeping the scroll position of a refresh ----
-  const scroll = page.dataset.shown === String(number) ? page.scrollTop : 0;
+  const scroll = page.scrollTop;
   const main = el("div", "pr-main");
   main.append(tabs, body);
   const grid = el("div", "pr-grid");
   grid.append(main, side);
   page.replaceChildren(head, grid);
-  page.dataset.shown = String(number);
   // Keys while the tab has focus and you aren't typing: 1–4 switch sections, R refreshes, C goes to the comment
   // box, and O opens the pull request in the browser.
   page.tabIndex = -1;
@@ -608,14 +618,14 @@ export async function renderPullRequest(number: number) {
     else if (key === "r") reload();
     else if (key === "o") openUrl(pr.url);
     else if (key === "c") {
-      if (section !== "conversation") show("conversation");
+      if (entry.section !== "conversation") show("conversation");
       page.querySelector<HTMLTextAreaElement>(".pr-composer textarea")?.focus();
     } else return;
     e.preventDefault();
   };
-  show(section);
+  show(entry.section);
   page.scrollTop = scroll;
-  watchPullRequest(pr);
+  watchPullRequest(pr, entry);
   // Fetch the head and base now, so opening a file's diff doesn't wait for the network.
   prepareDiff(pr).catch(() => {});
 }
@@ -717,22 +727,22 @@ function reviewerList(pr: Details, repo: string) {
 /**
  * While checks run, GitHub is still working out whether it can merge, or the pull request is under two minutes old
  * (before GitHub has queued its checks), looks at them every 15 seconds and redraws the tab when they or the merge state change, so the
- * checks, the status box, and the tab counts stay current. A hidden tab, or one where you're typing or editing a
- * comment, waits for the next tick. It stops once the tab shows another pull request or a newer version of this one.
+ * checks, the status box, and the tab counts stay current. A tab where you're typing or editing a comment waits for
+ * the next tick. It stops once the tab closes or shows a newer version of the pull request.
  */
-function watchPullRequest(pr: Details) {
+function watchPullRequest(pr: Details, entry: Page) {
   const settling = checksSummary(pr.statusCheckRollup) === "pending" || pr.mergeStateStatus === "UNKNOWN" || Date.now() - Date.parse(pr.createdAt) < 120_000;
   if (!settling || pr.state !== "OPEN") return;
-  const page = $("pr-detail");
+  const page = entry.el;
   const drawn = page.firstElementChild;
-  const current = () => hub.openNumber === pr.number && page.dataset.number === String(pr.number) && page.firstElementChild === drawn;
+  const current = () => pages.get(pr.number) === entry && page.firstElementChild === drawn;
   const key = (p: Pick<Details, "statusCheckRollup" | "mergeStateStatus">) => JSON.stringify([p.mergeStateStatus, (p.statusCheckRollup ?? []).map(checkState)]);
   const before = key(pr);
   setTimeout(async function tick() {
     if (!current()) return;
     // A hidden tab keeps watching, so it can tell you when checks finish while you work elsewhere; only a comment
-    // you're writing holds the redraw.
-    const busy = editing !== "" || (page.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement);
+    // you're editing or writing in this tab holds its redraw, not one in another pull request's tab.
+    const busy = !!page.querySelector(".pr-comment-form") || (page.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement);
     if (!busy) {
       try {
         const now = JSON.parse(await gh("pr", "view", String(pr.number), "--json", "statusCheckRollup,mergeStateStatus"));
@@ -769,5 +779,5 @@ export async function threadsChanged(number: number) {
     branchThreads.threads = await lineComments(number).catch(() => branchThreads!.threads);
     for (const model of monaco.editor.getModels()) decorateComments(model);
   }
-  if (hub.openNumber === number) renderPullRequest(number);
+  if (pages.has(number)) renderPullRequest(number);
 }

@@ -4,9 +4,9 @@ import { diffCursor, type DiffFile, git, gitOutput, gitStatus, showDiff, showDif
 import { suggestion } from "./gitparse";
 import { showError, status, withProgress } from "./status";
 import { mod } from "./platform.ts";
-import { type Details, el, gh, host, hub, loadMarkdown, markdown, me, myLogin, repoUrl, type Thread } from "./prshared";
+import { type Details, el, gh, host, hub, loadMarkdown, markdown, me, myLogin, pages, repoUrl, type Thread } from "./prshared";
 import { commentBlock, expanded, lineComments, mentions, restTarget } from "./prthreads";
-import { addPending, deletePending, loadPending, pending, pendingOf } from "./prreview";
+import { addPending, deletePending, loadPending, pendingOf, pendingReview } from "./prreview";
 
 // gh's --paginate follows $endCursor through every page of files.
 const VIEWED = `query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
@@ -52,8 +52,9 @@ export async function setResolved(number: number, t: Thread, resolved: boolean) 
  * on GitHub; otherwise it posts at once.
  */
 export async function replyTo(number: number, t: Thread, body: string) {
-  if (pending?.number === number && t.node) {
-    await gh("api", "graphql", "-f", "query=mutation($review: ID!, $thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewId: $review, pullRequestReviewThreadId: $thread, body: $body }) { comment { id } } }", "-f", `review=${pending.node}`, "-f", `thread=${t.node}`, "-f", `body=${body}`);
+  const review = await pendingOf(number);
+  if (review && t.node) {
+    await gh("api", "graphql", "-f", "query=mutation($review: ID!, $thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewId: $review, pullRequestReviewThreadId: $thread, body: $body }) { comment { id } } }", "-f", `review=${review.node}`, "-f", `thread=${t.node}`, "-f", `body=${body}`);
     await loadPending(number);
     host.status("Added the reply to your pending review.");
   } else {
@@ -95,7 +96,7 @@ export function prepareDiff(pr: Details): Promise<string> {
  */
 export function showFileDiff(pr: Details, path: string, threads: Thread[], at?: { line: number | null; side: "LEFT" | "RIGHT" }, since?: Since) {
   const label = since ? `#${pr.number}: since your review (${since.oid.slice(0, 7)})` : `#${pr.number}: ${pr.baseRefName} ↔ ${pr.headRefName}`;
-  const viewed = hub.viewedOf?.number === pr.number ? hub.viewedOf.files : undefined;
+  const viewed = pages.get(pr.number)?.viewed;
   const files: DiffFile[] = (since?.files ?? pr.files).map((f, i) => ({
     path: f.path,
     status: viewed?.get(f.path) ? "✓" : "",
@@ -119,7 +120,7 @@ export function showFileDiff(pr: Details, path: string, threads: Thread[], at?: 
             }
             viewed.set(f.path, box.checked);
             files[i].status = box.checked ? "✓" : "";
-            if (hub.openNumber === pr.number) hub.renderPullRequest(pr.number);
+            if (pages.has(pr.number)) hub.renderPullRequest(pr.number);
             if (!box.checked) return;
             const next = [...files.keys()].map((k) => (i + 1 + k) % files.length).find((k) => !viewed.get(files[k].path));
             if (next === undefined) host.status(`You've viewed all ${files.length} files of #${pr.number}.`);
@@ -232,7 +233,7 @@ export function drawZones() {
     }
     if (t.start_line && t.start_line !== t.line) thread.append(el("div", "pr-meta", `On ${lines(t.start_line, t.line)}`));
         for (const c of t.comments) {
-      thread.append(...commentBlock(c.user, c.body, restTarget(`repos/{owner}/{repo}/pulls/comments/${c.id}`), repo, drawZones, reload, c.created_at));
+      thread.append(...commentBlock(pr.number, c.user, c.body, restTarget(`repos/{owner}/{repo}/pulls/comments/${c.id}`), repo, drawZones, reload, c.created_at));
       const suggested = t.side === "RIGHT" ? suggestion(c.body) : null;
       if (suggested !== null) {
         const apply = el("div", "pr-thread-actions");
@@ -251,7 +252,7 @@ export function drawZones() {
     }
     addZone(editorFor(t.side), t.line, thread);
   }
-  for (const c of pending?.number === pr.number ? pending.comments : []) {
+  for (const c of pendingReview(pr.number)?.comments ?? []) {
     if (c.path !== path || !c.line) continue;
     const draft = el("div", "pr-thread pending");
     const remove = el("button", "link", "Delete");
@@ -273,7 +274,7 @@ function commentForm() {
   const text = el("textarea");
   text.rows = 4;
   text.placeholder = f.reply ? `Reply to ${f.reply.user} (Markdown)` : `Comment on ${lines(f.start, f.line)}${f.side === "LEFT" ? " of the old version" : ""} (Markdown)`;
-  mentions(text);
+  mentions(text, pr.number);
   const buttons = el("div", "pr-actions");
   const close = () => ((form = undefined), drawZones());
   const button = (label: string, run: (body: string) => unknown, primary = false) => {
@@ -285,7 +286,7 @@ function commentForm() {
     buttons.append(b);
   };
   // With a pending review, GitHub takes no comment outside it, so a reply joins the review, as on GitHub.
-  const inReview = pending?.number === pr.number;
+  const inReview = !!pendingReview(pr.number);
   if (f.reply) {
     const thread = f.reply;
     button(inReview && thread.node ? "Add Reply to Review" : "Reply", (body) => {

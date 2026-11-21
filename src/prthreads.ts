@@ -1,15 +1,15 @@
 // Pull requests: line comment threads, editing your own comments, and the Markdown comment box with @ suggestions.
 import { showError } from "./status";
 import { mod } from "./platform.ts";
-import { el, gh, host, hub, markdown, myLogin, type ReviewComment, type Thread, when } from "./prshared";
+import { el, gh, host, markdown, myLogin, pages, type ReviewComment, type Thread, when } from "./prshared";
 
 let assignable: { root: string; logins: Promise<string[]> } | undefined;
 
 /**
- * Suggests people after "@" in a comment box: the pull request's participants first, then everyone who can be
- * assigned in the repository. ↑ and ↓ choose, Enter or Tab inserts, and Escape closes the list.
+ * Suggests people after "@" in a comment box: the participants of pull request `number` first, then everyone who
+ * can be assigned in the repository. ↑ and ↓ choose, Enter or Tab inserts, and Escape closes the list.
  */
-export function mentions(text: HTMLTextAreaElement) {
+export function mentions(text: HTMLTextAreaElement, number: number) {
   if (assignable?.root !== host.root())
     assignable = { root: host.root(), logins: gh("api", "--paginate", "repos/{owner}/{repo}/assignees", "--jq", ".[].login").then((o) => o.split("\n").filter(Boolean), () => []) };
   const list = el("ul", "pr-mentions");
@@ -42,7 +42,7 @@ export function mentions(text: HTMLTextAreaElement) {
   text.addEventListener("input", async () => {
     const q = query();
     if (q === undefined) return close();
-    const all = [...new Set([...hub.participants, ...(await assignable!.logins)])].filter((l) => l !== myLogin);
+    const all = [...new Set([...(pages.get(number)?.participants ?? []), ...(await assignable!.logins)])].filter((l) => l !== myLogin);
     if (query() !== q) return; // You typed on while the list loaded.
     matches = all.filter((l) => l.toLowerCase().startsWith(q.toLowerCase())).slice(0, 8);
     index = 0;
@@ -67,7 +67,7 @@ export function mentions(text: HTMLTextAreaElement) {
 }
 
 /** A Markdown text box with Write and Preview tabs, which renders the text as it will show on GitHub. */
-export function writer(text: HTMLTextAreaElement, repo: string) {
+export function writer(text: HTMLTextAreaElement, repo: string, number: number) {
   const box = el("div", "pr-writer");
   const tabs = el("div", "pr-writer-tabs");
   const preview = el("div", "pr-writer-preview");
@@ -89,7 +89,7 @@ export function writer(text: HTMLTextAreaElement, repo: string) {
   tab("Write", false);
   tab("Preview", true);
   tabs.lastElementChild!.setAttribute("aria-pressed", "false");
-  box.append(tabs, mentions(text), preview);
+  box.append(tabs, mentions(text, number), preview);
   return box;
 }
 
@@ -124,7 +124,7 @@ async function threadStates(number: number) {
 }
 
 /** The comment being edited, and the one whose delete waits for a second click, by their targets' keys. */
-export let editing = "";
+let editing = "";
 let deleting = "";
 
 /** How to change a comment on GitHub: `key` names it, and a review's summary has no `remove`, since GitHub keeps it. */
@@ -136,10 +136,10 @@ export const reviewTarget = (id: string): Target => ({
 });
 
 /**
- * A comment's author and text, with Edit and Delete when it's yours. `target` changes it on GitHub.
- * `redraw` draws it again after you start or cancel an edit, and `reload` fetches everything after GitHub changed it.
+ * A comment on pull request `number`: its author and text, with Edit and Delete when it's yours. `target` changes it
+ * on GitHub. `redraw` draws it again after you start or cancel an edit, and `reload` fetches everything after GitHub changed it.
  */
-export function commentBlock(user: string, body: string, target: Target, repo: string, redraw: () => void, reload: () => unknown, at?: string, label = ""): HTMLElement[] {
+export function commentBlock(number: number, user: string, body: string, target: Target, repo: string, redraw: () => void, reload: () => unknown, at?: string, label = ""): HTMLElement[] {
   const meta = el("div", "pr-meta", `${user}${label ? ` · ${label}` : ""}`);
   const api = target.key;
   if (at) meta.append(when(at));
@@ -160,7 +160,7 @@ export function commentBlock(user: string, body: string, target: Target, repo: s
   };
   if (editing === api) {
     const box = el("div", "pr-comment-form");
-    const text = mentions(el("textarea"));
+    const text = mentions(el("textarea"), number);
     text.rows = 4;
     text.value = body;
     const buttons = el("div", "pr-actions");
