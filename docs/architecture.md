@@ -10458,3 +10458,17 @@ user code:
   commit.
 - Image diffs read blobs through `git cat-file blob | base64`, since
   `run_capture` decodes output as text, so no new Rust command was needed.
+
+### 2026-11-21: The Conversation tab comes from GraphQL's timeline
+
+- `timelineItems` has the events, each comment's reactions, whether you
+  reacted, and whether you can hide it; neither `gh pr view --json` nor REST
+  has all of these. Reactions, hiding, unhiding, and dismissing are GraphQL
+  mutations by node ID, so one ID works for comments, reviews, line comments,
+  and the description. If the query fails, the tab falls back to `gh`'s
+  comments and reviews.
+- Saved replies are a setting in `settings.json`, not `localStorage`, so
+  they're per user, backed up with your settings, and editable in the file.
+- Emoji use Unicode where GitHub's file name holds the whole emoji, and
+  GitHub's image otherwise, since its file names drop the joiners that
+  sequences need. No new dependency.
