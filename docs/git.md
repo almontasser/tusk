@@ -306,12 +306,21 @@ tab), the review decision, and whether it can merge, with a button that deals
 with it:
 
 - **Draft**: click **Ready for Review**.
-- **Conflicts** with the base branch: click **Check Out** and merge the base
-  into it.
+- **Conflicts** with the base branch: click **Resolve Conflicts…** to merge
+  the base into the branch here. See [Merging](#merging).
 - **Behind** the base branch: click **Update Branch** to merge the base into
   it, or rebase onto it, on GitHub.
 - **Blocked** by a missing approval, requested changes, or a required check.
-- **Auto-merge is on**: click **Turn Off** to stop it.
+- **Auto-merge is on**: click **Turn Off** to stop it. This line shows even
+  while conflicts or a branch that's behind hold the merge up.
+- **Queued to merge**: the pull request is in the merge queue. Click
+  **Remove…** to take it out.
+
+A merged or closed pull request's box offers **Revert…**, **Delete Branch…**, or
+**Restore Branch…** when they apply. See [Merging](#merging).
+
+In the **Reviewers** list, the ↻ button next to someone who already reviewed
+asks them to review again. GitHub notifies them, so you confirm first.
 
 ### Checks
 
@@ -422,16 +431,56 @@ is unresolved), a faint highlight on the line, and the latest comment after the
 line's end. Hover the icon to read the whole thread, and click it, or **Open in
 #123** in the hover, to open the thread in the pull request's diff. When the current branch has a pull
 request, its number and check status appear next to the branch name in the
-status bar. **Merge…** asks how to merge (a merge commit, squash, or rebase)
-and asks you to confirm before it merges on GitHub. It offers only the methods
-the repository allows, when GitHub tells you (it tells repository admins), and
-puts the one you used last first. The confirmation also
-offers to delete the branch after merging, and, while checks or reviews are
-still missing, **Merge When Ready**, which turns on GitHub's auto-merge.
+status bar.
 
 **More Actions** (the **…** button) edits the title, requests a review, adds or removes labels, converts
 the pull request to a draft or marks it ready, updates the branch, closes or
 reopens it, and copies its link or branch name.
+
+### Merging
+
+**Merge…** asks how to merge (a merge commit, squash, or rebase). It offers
+only the methods the repository allows, when GitHub tells you (it tells
+repository admins), and puts the one you used last first.
+
+For a merge commit or a squash, a dialog then shows the commit's subject and
+message, filled in the way GitHub fills them in from the repository's settings,
+such as the title with ` (#12)` and the commit list for a squash. Edit them,
+then click **Continue** (or press ⌘↩). A rebase keeps the branch's commits, so
+it has no message to edit.
+
+You then confirm in the palette. Besides merging, it offers to merge and delete
+the branch, and, while checks or reviews are still missing and the repository
+allows it, **Merge When Ready**, which turns on GitHub's auto-merge. When you're
+a repository admin and the branch's rules block the merge, it also offers
+**Merge without waiting for requirements**, which merges with your admin rights
+and skips the required reviews and checks.
+
+When the base branch uses a merge queue, **Merge…** offers **Add to Merge
+Queue** instead of the methods, since the queue merges with the method its rules
+set. If required checks are still running, GitHub turns on auto-merge instead,
+and queues the pull request once they pass; the status bar says which happened.
+While the pull request is queued, the status box shows **Queued to merge** and
+the entry's state, and **Merge…** or **Remove…** takes it out of the queue. An
+admin can also choose **Merge Without the Queue…**.
+
+When the pull request conflicts with its base, **Resolve Conflicts…** checks out
+its branch (unless it's checked out already), fetches the base, and merges it
+into the branch here. The merge tool opens on the first conflicted file; see
+[Merge conflicts](#merge-conflicts). When you're done, commit the merge and push
+it from the Commit tab. Nothing is pushed for you.
+
+After a pull request merges or closes, its status box offers:
+
+- **Revert…**: creates a pull request on GitHub that undoes a merged pull
+  request, then opens it. Nothing changes until you merge it.
+- **Delete Branch…**: deletes the pull request's branch on GitHub. Your local
+  branch stays.
+- **Restore Branch…**: recreates a deleted branch on GitHub at the pull
+  request's last commit.
+
+Each of these asks you to confirm first. The branch actions aren't offered for
+a pull request from a fork, whose branch is in another repository.
 
 ### Creating a pull request
 

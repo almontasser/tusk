@@ -3259,3 +3259,9 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .remote-note-actions { display: flex; gap: 12px; }
 .remote-empty { padding: 16px 14px; color: var(--muted); display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .remote-empty p { margin: 0; }
+
+/* Pull requests: merging */
+.pr-merge-dialog { width: min(640px, calc(100vw - 32px)); }
+.pr-merge-dialog label.field textarea { font: 12.5px var(--mono); resize: vertical; min-height: 120px; }
+.pr-rerequest { margin-left: 2px; font-size: 12px; opacity: 0.6; }
+.pr-rerequest:hover, .pr-rerequest:focus-visible { opacity: 1; }
