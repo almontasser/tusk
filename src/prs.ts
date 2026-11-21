@@ -24,7 +24,7 @@ type PullRequest = {
 };
 type Label = { name: string; color: string };
 /** A row of the list, with more than the status bar's lookup needs. */
-type ListedPullRequest = PullRequest & { state: string; labels: Label[]; updatedAt: string; additions: number; deletions: number };
+type ListedPullRequest = PullRequest & { state: string; labels: Label[]; updatedAt: string; additions: number; deletions: number; reviewRequests: { login?: string; name?: string; slug?: string }[] };
 type Details = ListedPullRequest & {
   id: string;
   body: string;
@@ -39,6 +39,9 @@ type Details = ListedPullRequest & {
   mergeable: string;
   mergeStateStatus: string;
   autoMergeRequest: { mergeMethod: string } | null;
+  assignees: { login: string }[];
+  milestone: { title: string } | null;
+  closingIssuesReferences: { number: number; url: string; repository: { name: string; owner: { login: string } } }[];
 };
 
 /** A comment on a line of the diff. `line` is null when the code it was on has changed since. */
@@ -57,8 +60,8 @@ type Host = {
 
 const $ = (id: string) => document.getElementById(id)!;
 const FIELDS = "number,title,author,headRefName,baseRefName,isDraft,reviewDecision,statusCheckRollup,url";
-const LIST_FIELDS = `${FIELDS},state,labels,updatedAt,additions,deletions`;
-const DETAIL_FIELDS = `${LIST_FIELDS},id,body,headRefOid,files,comments,reviews,createdAt,latestReviews,reviewRequests,commits,mergeable,mergeStateStatus,autoMergeRequest`;
+const LIST_FIELDS = `${FIELDS},state,labels,updatedAt,additions,deletions,reviewRequests`;
+const DETAIL_FIELDS = `${LIST_FIELDS},id,body,headRefOid,files,comments,reviews,createdAt,latestReviews,reviewRequests,commits,mergeable,mergeStateStatus,autoMergeRequest,assignees,milestone,closingIssuesReferences`;
 const icons = { passed: "✓", failed: "✗", pending: "●", skipped: "–", none: "" };
 const reviews: Record<string, string> = { APPROVED: "Approved", CHANGES_REQUESTED: "Changes requested", REVIEW_REQUIRED: "Review required" };
 let host: Host;
@@ -135,8 +138,8 @@ export async function loadPullRequests() {
   if ($("pr-list").dataset.key !== key) ($("pr-list").dataset.key = key), (limit = 50), $("pr-list").replaceChildren(el("li", "muted", "Loading…"));
   try {
     // GitHub times out building the check status of 50 closed pull requests, and it matters little once closed.
-    const fields = state.length ? LIST_FIELDS.replace(",statusCheckRollup", "") : LIST_FIELDS;
-    const prs: ListedPullRequest[] = JSON.parse(await gh("pr", "list", "--limit", String(limit), "--json", fields, ...args));
+    const fields = state.length ? LIST_FIELDS.replace(",statusCheckRollup", "").replace(",reviewRequests", "") : LIST_FIELDS;
+    const [prs]: [ListedPullRequest[], unknown] = await Promise.all([gh("pr", "list", "--limit", String(limit), "--json", fields, ...args).then(JSON.parse), me()]);
     if ($("pr-list").dataset.key !== key) return; // A newer search replaced this one.
     const seenAt = seen();
     const more = el("li", "pr-more");
@@ -144,13 +147,37 @@ export async function loadPullRequests() {
     button.onclick = () => ((limit += 50), (button.disabled = true), (button.textContent = "Loading…"), loadPullRequests());
     more.append(button);
     $("pr-list").replaceChildren(
-      ...(prs.length ? prs.map((pr) => prRow(pr, seenAt)) : [el("li", "muted", text ? "No pull requests match the search." : "No pull requests.")]),
+      ...(prs.length ? sections(filter === "open" && !text ? prs : [], prs).flatMap(([title, group]) => [...(title ? [sectionHead(title, group.length)] : []), ...group.map((pr) => prRow(pr, seenAt))]) : [el("li", "muted", text ? "No pull requests match the search." : "No pull requests.")]),
       // gh has no offset, so Load More asks for a longer list; a full page means there may be more.
       ...(prs.length === limit ? [more] : []),
     );
   } catch (e) {
     $("pr-list").replaceChildren(problemItem("Can't list pull requests", e));
   }
+}
+
+/**
+ * The open list split as a review queue: pull requests waiting for your review, then yours, then everyone else's,
+ * each newest first. Without a split (a filter, a search, or one group only), one untitled group.
+ */
+function sections(split: ListedPullRequest[], all: ListedPullRequest[]): [string, ListedPullRequest[]][] {
+  if (!split.length || !myLogin) return [["", all]];
+  const asked = split.filter((p) => p.reviewRequests?.some((r) => r.login === myLogin));
+  const mine = split.filter((p) => p.author.login === myLogin && !asked.includes(p));
+  const rest = split.filter((p) => !asked.includes(p) && !mine.includes(p));
+  const groups: [string, ListedPullRequest[]][] = [
+    ["Waiting for your review", asked],
+    ["Yours", mine],
+    ["Everyone else", rest],
+  ];
+  return groups.filter(([, g]) => g.length).length > 1 ? groups.filter(([, g]) => g.length) : [["", all]];
+}
+
+function sectionHead(title: string, count: number) {
+  const li = el("li", "pr-list-section");
+  li.role = "presentation";
+  li.append(title, el("span", "pr-count", String(count)));
+  return li;
 }
 
 /**
@@ -485,7 +512,7 @@ async function renderPullRequest(number: number) {
             if (e.key === "Enter" && mod(e)) send.click();
             if (e.key === "Escape") cancel.click();
           };
-          form.append(text, buttons);
+          form.append(writer(text, repo), buttons);
           footer.replaceWith(form);
           text.focus();
         });
@@ -590,7 +617,7 @@ async function renderPullRequest(number: number) {
     text.onkeydown = (e) => e.key === "Enter" && mod(e) && buttons.querySelector<HTMLButtonElement>("button.primary")!.click();
     const hint = el("span", "muted pr-hint", `${isMac ? "⌘" : "Ctrl+"}⏎ to ${hasPending ? "submit" : "comment"}`);
     buttons.prepend(hint);
-    box.append(text, buttons);
+    box.append(writer(text, repo), buttons);
     return box;
   }
 
@@ -747,7 +774,27 @@ async function renderPullRequest(number: number) {
     side.append(block);
   };
   sideBlock("Reviewers", reviewerList(pr, repo), open ? () => requestReview(pr, run) : undefined);
+  sideBlock("Assignees", peopleList(pr.assignees.map((a) => a.login), repo, "No one"), () => editAssignees(pr, run));
   sideBlock("Labels", pr.labels.length ? labelRow(pr.labels) : el("div", "muted", "None yet"), () => editLabels(pr, run));
+  // Issues the pull request closes when it merges, from "Fixes #12" in its description or a link on GitHub.
+  if (pr.closingIssuesReferences.length) {
+    const list = el("ul", "pr-reviewer-list");
+    for (const i of pr.closingIssuesReferences) {
+      const li = el("li");
+      const other = `${i.repository.owner.login}/${i.repository.name}` !== repo.replace(/^https?:\/\/[^/]+\//, "");
+      const link = el("button", "link", `${other ? `${i.repository.owner.login}/${i.repository.name}` : ""}#${i.number}`);
+      link.title = `Open ${i.url}`;
+      link.onclick = () => openUrl(i.url);
+      li.append(icon("issues", "checks-passed"), link);
+      list.append(li);
+    }
+    sideBlock("Closes", list);
+  }
+  if (pr.milestone) {
+    const m = el("div");
+    m.append(icon("milestone", "muted"), ` ${pr.milestone.title}`);
+    sideBlock("Milestone", m);
+  }
 
   // ---- Put it together, keeping the scroll position of a refresh ----
   const scroll = page.dataset.shown === String(number) ? page.scrollTop : 0;
@@ -778,6 +825,33 @@ async function renderPullRequest(number: number) {
   watchPullRequest(pr);
   // Fetch the head and base now, so opening a file's diff doesn't wait for the network.
   prepareDiff(pr).catch(() => {});
+}
+
+/** A Markdown text box with Write and Preview tabs, which renders the text as it will show on GitHub. */
+function writer(text: HTMLTextAreaElement, repo: string) {
+  const box = el("div", "pr-writer");
+  const tabs = el("div", "pr-writer-tabs");
+  const preview = el("div", "pr-writer-preview");
+  preview.hidden = true;
+  const tab = (label: string, previewing: boolean) => {
+    const b = el("button", "", label);
+    b.type = "button";
+    b.setAttribute("aria-pressed", String(!previewing));
+    b.onclick = () => {
+      tabs.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      if (previewing) preview.replaceChildren(markdown(text.value.trim() || "_Nothing to preview._", repo));
+      preview.style.minHeight = `${text.offsetHeight}px`;
+      text.hidden = previewing;
+      preview.hidden = !previewing;
+      if (!previewing) text.focus();
+    };
+    tabs.append(b);
+  };
+  tab("Write", false);
+  tab("Preview", true);
+  tabs.lastElementChild!.setAttribute("aria-pressed", "false");
+  box.append(tabs, text, preview);
+  return box;
 }
 
 /** The last lines of the diff a thread is on, as GitHub shows above a review comment. */
@@ -851,6 +925,35 @@ function labelChip(l: Label) {
   const chip = el("span", "pr-label", l.name);
   chip.style.setProperty("--label", `#${l.color}`);
   return chip;
+}
+
+/** People with their avatars, or `none` when there are none. */
+function peopleList(logins: string[], repo: string, none: string) {
+  if (!logins.length) return el("div", "muted", none);
+  const list = el("ul", "pr-reviewer-list");
+  for (const login of logins) {
+    const li = el("li");
+    li.append(avatar(login, repo), el("span", "pr-row-main", login));
+    list.append(li);
+  }
+  return list;
+}
+
+/** Adds or removes an assignee, from the people who can be assigned in the repository. */
+function editAssignees(pr: Details, run: (progress: string, args: string[], done: string, error: string) => unknown) {
+  const people = gh("api", "--paginate", "repos/{owner}/{repo}/assignees", "--jq", ".[].login").then((out) => out.split("\n").filter(Boolean));
+  const has = new Set(pr.assignees.map((a) => a.login));
+  pick("Assign or unassign", async (q) => {
+    const logins = await people.catch((e) => (showError("Can't list the people who can be assigned", e), [] as string[]));
+    return logins
+      .filter((l) => l.toLowerCase().includes(q.toLowerCase()))
+      .sort((a, b) => Number(has.has(b)) - Number(has.has(a)) || Number(b === myLogin) - Number(a === myLogin))
+      .map((l) => ({
+        label: `${has.has(l) ? "✓ " : ""}${l}${l === myLogin ? " (you)" : ""}`,
+        detail: has.has(l) ? "unassign" : undefined,
+        run: () => run(`Changing the assignees of #${pr.number}…`, ["pr", "edit", String(pr.number), has.has(l) ? "--remove-assignee" : "--add-assignee", l], `${has.has(l) ? "Unassigned" : "Assigned"} ${l}`, "Can't change the assignees"),
+      }));
+  });
 }
 
 /** Who reviewed and how, and who's still asked to. */
@@ -1466,6 +1569,7 @@ async function showOneDiff(pr: Details, path: string, threads: Thread[], at?: { 
   }
   diff.layout(); // The diff was hidden until now, so its editors have no width yet.
   shown = { pr, path, threads, diff, zones: [], model: diff.getModel()?.modified };
+  addCommentGutter(diff);
   form = undefined;
   drawZones();
   // Your pending review usually loaded with the pull request's page; if it's still on its way, its comments are
@@ -1731,6 +1835,44 @@ function commentForm() {
   box.append(text, buttons);
   requestAnimationFrame(() => text.focus());
   return box;
+}
+
+/** Diff editors that have the comment gutter's listeners; the diff editor is made once and reused. */
+const guttered = new WeakSet<monaco.editor.IStandaloneDiffEditor>();
+
+/**
+ * A + in the gutter of the line under the mouse, as on GitHub: click it to comment on that line, or on the selected
+ * lines when the selection includes it. Only a pull request's diff has it; other diffs hide the glyph margin again.
+ */
+function addCommentGutter(diff: monaco.editor.IStandaloneDiffEditor) {
+  const sides: [monaco.editor.ICodeEditor, "LEFT" | "RIGHT"][] = [[diff.getOriginalEditor(), "LEFT"], [diff.getModifiedEditor(), "RIGHT"]];
+  for (const [editor] of sides) editor.updateOptions({ glyphMargin: true });
+  if (guttered.has(diff)) return;
+  guttered.add(diff);
+  const ours = () => !!shown && shown.diff === diff && diff.getModel()?.modified === shown.model;
+  diff.onDidChangeModel(() => {
+    if (!ours()) for (const [editor] of sides) editor.updateOptions({ glyphMargin: false });
+  });
+  for (const [editor, side] of sides) {
+    let hover: string[] = [];
+    const show = (line?: number) => {
+      const model = editor.getModel();
+      if (!model) return;
+      hover = model.deltaDecorations(hover, line && ours() ? [{ range: new monaco.Range(line, 1, line, 1), options: { glyphMarginClassName: "codicon codicon-add pr-add-glyph", glyphMarginHoverMessage: { value: "Comment on this line (select lines first for a range)" } } }] : []);
+    };
+    editor.onMouseMove((e) => show(e.target.position?.lineNumber));
+    editor.onMouseLeave(() => show());
+    editor.onMouseDown((e) => {
+      if (!ours() || !e.event.leftButton || !e.target.element?.classList.contains("pr-add-glyph")) return;
+      const line = e.target.position!.lineNumber;
+      const s = editor.getSelection();
+      const end = s && s.endColumn === 1 && s.endLineNumber > s.startLineNumber ? s.endLineNumber - 1 : s?.endLineNumber;
+      const range = s && end && s.startLineNumber <= line && line <= end && end > s.startLineNumber ? [s.startLineNumber, end] : [line, line];
+      e.event.preventDefault();
+      form = { side, line: range[1], start: range[0] };
+      drawZones();
+    });
+  }
 }
 
 /** Opens the comment form for the selected lines in the diff, or a reply to the thread on the cursor's line. */

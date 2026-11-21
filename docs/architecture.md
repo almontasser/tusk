@@ -3966,6 +3966,17 @@ request's line numbers, so unpushed commits that move lines put them off.
 only to admins; when they're null, all three methods show. The last method you
 merged with is kept in `localStorage` per project.
 
+The diff's **+** comes from `addCommentGutter`: the reused diff editor gets its
+mouse listeners once (`guttered`), and the glyph margin turns on for a pull
+request's diff and off again when the diff shows anything else. A hover
+decoration in the glyph margin follows the mouse; a click on it opens the form
+for that line, or for the selection when the click is inside it. The
+Write/Preview tabs (`writer`) are only on the tab's boxes: a box in the diff is
+a view zone with a fixed height, which a preview would overflow.
+
+The list's review queue needs `reviewRequests` on each row, which the open
+list asks for; the closed lists leave it out with `statusCheckRollup`.
+
 #### Fields, checks, and the status box
 
 There are three field lists: `FIELDS` for the status bar's lookup, `LIST_FIELDS`

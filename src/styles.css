@@ -742,6 +742,7 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 #pr-list, .pr-rows, .pr-reviewer-list, .pr-pending { list-style: none; margin: 0; padding: 0; }
 #pr-list li.pr { display: flex; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--border-subtle); cursor: default; }
 #pr-list li.pr:hover { background: var(--hover); }
+#pr-list li.pr-list-section { display: flex; align-items: center; gap: 4px; position: sticky; top: 0; z-index: 1; padding: 6px 12px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); background: var(--panel); border-bottom: 1px solid var(--border-subtle); }
 #pr-list li.pr.open { background: var(--selected-inactive); box-shadow: inset 2px 0 0 var(--accent); }
 .pr-row-state { flex-shrink: 0; margin-top: 2px; }
 .pr-row-text { min-width: 0; flex: 1; }
@@ -835,6 +836,11 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .pr-composer textarea { display: block; width: 100%; box-sizing: border-box; min-height: 64px; max-height: 40vh; resize: vertical; padding: 8px 10px; font: var(--ui); border-radius: 8px; }
 .pr-composer .pr-actions { justify-content: flex-end; align-items: center; margin-top: 8px; }
 .pr-hint { margin-right: auto; font-size: 12px; }
+.pr-writer-tabs { display: flex; gap: 2px; margin-bottom: 4px; }
+.pr-writer-tabs button { height: 22px; padding: 0 10px; border-radius: var(--radius); font-size: 12px; color: var(--muted); }
+.pr-writer-tabs button[aria-pressed="true"] { background: var(--hover); color: var(--text); }
+.pr-writer-preview { box-sizing: border-box; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); overflow: auto; max-height: 40vh; }
+.pr-writer-preview .pr-body { margin: 0; }
 .pr-pending { margin-bottom: 8px; border: 1px solid color-mix(in srgb, var(--yellow) 45%, transparent); border-radius: 8px; overflow: hidden; }
 .pr-pending li { display: flex; gap: 8px; align-items: center; padding: 4px 10px; }
 .pr-pending li:not(.pr-pending-head):hover { background: var(--hover); }
@@ -874,6 +880,7 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .pr-check-group { font-weight: 600; background: color-mix(in srgb, var(--text) 3%, transparent); cursor: default; }
 .pr-check-group .muted { font-weight: 400; font-size: 12px; }
 .pr-checks .pr-check-group ~ .pr-check { padding-left: 34px; }
+.pr-add-glyph { color: var(--on-accent); background: var(--accent); border-radius: 4px; cursor: pointer; font-size: 13px !important; transform: scale(0.85); }
 .pr-glyph { color: var(--yellow); cursor: pointer; font-size: 14px !important; }
 .pr-glyph.resolved { color: var(--faint); }
 .pr-comment-line { background: color-mix(in srgb, var(--yellow) 7%, transparent); }
@@ -940,6 +947,7 @@ button.link:hover { text-decoration: underline; }
 .pr-comment-form textarea { width: 100%; box-sizing: border-box; resize: none; font: var(--ui); }
 .pr-comment-form .pr-actions { margin-top: 6px; }
 .pr-body { overflow-wrap: anywhere; margin-top: 4px; -webkit-user-select: text; user-select: text; line-height: 1.5; }
+.pr-add-glyph { color: var(--on-accent); background: var(--accent); border-radius: 4px; cursor: pointer; font-size: 13px !important; transform: scale(0.85); }
 .pr-glyph { color: var(--yellow); cursor: pointer; font-size: 14px !important; }
 .pr-glyph.resolved { color: var(--faint); }
 .pr-comment-line { background: color-mix(in srgb, var(--yellow) 7%, transparent); }

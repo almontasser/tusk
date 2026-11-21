@@ -268,8 +268,9 @@ GitHub CLI. Filter by open pull requests, ones you created, ones waiting for
 your review, or closed, merged, or all pull requests, and type in the search
 box to search them with GitHub's search syntax, such as `fix label:bug`. Each
 row shows check status (✓ passed, ✗ failed, ● running; open lists only), the review decision,
-the lines added and removed, when it last changed, and its labels. The list
-shows 50 at a time; **Load More** at the end shows 50 more. If the GitHub CLI isn't installed, or
+the lines added and removed, when it last changed, and its labels. The **Open**
+list, without a search, is split into a review queue: **Waiting for your
+review**, **Yours**, and **Everyone else**. The list shows 50 at a time; **Load More** at the end shows 50 more. If the GitHub CLI isn't installed, or
 you aren't logged in, the tab says so and offers to fix it.
 
 Click a pull request to open it in an editor tab, beside your files; the list
@@ -289,9 +290,11 @@ last opened it, such as a new comment, review, or push. Pull requests you
 haven't opened aren't marked.
 
 The column beside the tabs shows the status box, the reviewers (✓ approved,
-✗ changes requested, ● still asked to review), and the labels. The gear next
-to **Reviewers** requests a review, and the one next to **Labels** adds or
-removes labels.
+✗ changes requested, ● still asked to review), the assignees, and the labels,
+then the issues the pull request closes when it merges and its milestone, when
+it has them. The gear next to **Reviewers** requests a review, the one next to
+**Assignees** assigns or unassigns someone, and the one next to **Labels** adds
+or removes labels. Click a closed issue's number to open it in your browser.
 
 The status box tells you what stands between the pull request and merging, as
 GitHub's merge box does: the checks (with **Details**, which opens the Checks
@@ -344,7 +347,8 @@ to move to the list.
 ### Conversation
 
 Descriptions and comments render as GitHub Markdown, and their links open in
-your browser. `#123` links to that issue or pull request, and
+your browser. The comment box and the reply boxes in the conversation have
+**Write** and **Preview** tabs; **Preview** shows your text as GitHub will. `#123` links to that issue or pull request, and
 `@name` to that person's profile.
 
 Line comments appear in the conversation under the file and lines they're on,
@@ -363,8 +367,11 @@ Deleting asks you to click **Delete** again to confirm.
 
 To comment on code in the diff:
 
-1. Click a line, or select several lines, on the new side or the old side.
-2. Click **Comment on Line**. A comment box opens under the line.
+1. Point at a line, on the new side or the old side, and click the blue **+**
+   in its gutter. To comment on several lines, select them first, then click
+   the **+** of one of them. You can also select the lines and click **Comment
+   on Line** in the diff's header.
+2. A comment box opens under the line.
 3. Write the comment (Markdown, on as many lines as you like), then click
    **Add to Review** to keep it for your review, or **Comment Now** to post it
    at once. ⌘⏎ adds it to the review, and Escape closes the box. On the new
