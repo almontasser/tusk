@@ -3,9 +3,15 @@ import { confirm, pick } from "./palette";
 import { showError, withProgress } from "./status";
 import { type Details, gh, host, hub, myLogin } from "./prshared";
 
+/** The people who can be assigned in a repository, the current one unless you name another as `owner/repo`. */
+export const assignable = (repo = "{owner}/{repo}") => gh("api", "--paginate", `repos/${repo}/assignees`, "--jq", ".[].login").then((out) => out.split("\n").filter(Boolean));
+/** A repository's labels, the current one's unless you name another as `owner/repo`. */
+export const repoLabels = (repo?: string) =>
+  gh("label", "list", "--limit", "500", "--json", "name,description,color", ...(repo ? ["-R", repo] : [])).then((out) => JSON.parse(out) as { name: string; description: string; color: string }[]);
+
 /** Adds or removes an assignee, from the people who can be assigned in the repository. */
 export function editAssignees(pr: Details, run: (progress: string, args: string[], done: string, error: string) => unknown) {
-  const people = gh("api", "--paginate", "repos/{owner}/{repo}/assignees", "--jq", ".[].login").then((out) => out.split("\n").filter(Boolean));
+  const people = assignable();
   const has = new Set(pr.assignees.map((a) => a.login));
   pick("Assign or unassign", async (q) => {
     const logins = await people.catch((e) => (showError("Can't list the people who can be assigned", e), [] as string[]));
@@ -71,7 +77,7 @@ function editTitle(pr: Details, run: (progress: string, args: string[], done: st
 
 /** Asks for someone to review, from the people who can be assigned in the repository. */
 export function requestReview(pr: Details, run: (progress: string, args: string[], done: string, error: string) => unknown) {
-  const people = gh("api", "--paginate", "repos/{owner}/{repo}/assignees", "--jq", ".[].login").then((out) => out.split("\n").filter(Boolean));
+  const people = assignable();
   const asked = new Set([...pr.reviewRequests.map((r) => r.login), ...pr.latestReviews.map((r) => r.author.login)]);
   pick("Request a review from", async (q) => {
     const logins = (await people.catch((e) => (showError("Can't list the people who can review", e), [] as string[]))).filter((l) => l !== pr.author.login);
@@ -84,7 +90,7 @@ export function requestReview(pr: Details, run: (progress: string, args: string[
 
 /** Adds or removes a label, from the repository's labels. */
 export function editLabels(pr: Details, run: (progress: string, args: string[], done: string, error: string) => unknown) {
-  const labels = gh("label", "list", "--limit", "500", "--json", "name,description").then((out) => JSON.parse(out) as { name: string; description: string }[]);
+  const labels = repoLabels();
   const has = new Set(pr.labels.map((l) => l.name));
   pick("Add or remove a label", async (q) => {
     const all = await labels.catch((e) => (showError("Can't list the labels", e), []));
