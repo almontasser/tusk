@@ -1,6 +1,6 @@
 // Pull requests through the GitHub CLI (`gh`): list, details, checks, reviews, line comments, and diffs.
 import { invoke } from "@tauri-apps/api/core";
-import type { monaco } from "./editor";
+import { monaco } from "./editor";
 import { type DiffFile, diffCursor, git, gitOutput, gitStatus, gitTask, showDiff, showDiffs, showOutput } from "./git";
 import { actionsJob, age, type Check, checkDuration, checkState, checksSummary, cleanLog, sortChecks, suggestion } from "./gitparse";
 import { showCommitDiff } from "./history";
@@ -293,11 +293,13 @@ async function renderPullRequest(number: number) {
   let pr: Details;
   let threads: Thread[];
   let viewed: Map<string, boolean>;
+  let headCommit: string;
   try {
-    [pr, threads, viewed] = await Promise.all([
+    [pr, threads, viewed, headCommit] = await Promise.all([
       gh("pr", "view", String(number), "--json", DETAIL_FIELDS).then(JSON.parse),
       lineComments(number),
       viewedFiles(number).catch(() => new Map<string, boolean>()),
+      git("rev-parse", "HEAD").then((h) => h.trim(), () => ""),
       me(),
       loadPending(number).catch(() => null),
     ]);
@@ -363,7 +365,14 @@ async function renderPullRequest(number: number) {
   iconButton("refresh", "Refresh", reload);
   iconButton("link-external", "Open in Browser", () => openUrl(pr.url));
   iconButton("ellipsis", "More Actions", () => more(pr, run));
-  button("Check Out", checkOut);
+  // On the pull request's branch, the button says so, or offers to pull when the pull request's head differs.
+  if (gitStatus()?.branch !== pr.headRefName) button("Check Out", checkOut);
+  else if (headCommit && headCommit !== pr.headRefOid && open)
+    button("Pull", () => gitTask(`Pulling ${pr.headRefName}…`, ["pull", "--ff-only"], `Can't pull ${pr.headRefName}`).then((o) => void (o !== undefined && reload())), "", "The pull request's branch on GitHub has commits that yours doesn't, or yours has commits it doesn't. Pull brings in GitHub's, if yours can fast-forward.");
+  else {
+    const here = button("Checked Out", () => {}, "pr-checked-out", "This is the current branch");
+    here.prepend(icon("check"), " ");
+  }
   if (open) {
     const m = button("Merge…", () => merge(pr), "primary", pr.isDraft ? "A draft can't be merged. Mark it ready for review first." : "");
     m.disabled = pr.isDraft;
@@ -1291,6 +1300,10 @@ async function setResolved(number: number, t: Thread, resolved: boolean) {
 /** Redraws the threads wherever the pull request shows them: its diff and its tab. */
 async function threadsChanged(number: number) {
   if (shown?.pr.number === number) (shown.threads = await lineComments(number).catch(() => shown!.threads)), drawZones();
+  if (branchThreads?.number === number) {
+    branchThreads.threads = await lineComments(number).catch(() => branchThreads!.threads);
+    for (const model of monaco.editor.getModels()) decorateComments(model);
+  }
   if (openNumber === number) renderPullRequest(number);
 }
 
@@ -1314,21 +1327,46 @@ async function replyTo(number: number, t: Thread, body: string) {
 const expanded = new Set<number>();
 
 /** Asks how to merge, confirms, and merges on GitHub. */
-function merge(pr: Details) {
+/** The merge methods the repository allows, read once per project. */
+let mergeSettings: { root: string; allowed: Promise<Record<string, boolean>> } | undefined;
+const lastMethodKey = () => `pr-merge-method:${host.root()}`;
+
+async function merge(pr: Details) {
+  if (mergeSettings?.root !== host.root())
+    mergeSettings = {
+      root: host.root(),
+      allowed: gh("api", "repos/{owner}/{repo}", "--jq", "{merge: .allow_merge_commit, squash: .allow_squash_merge, rebase: .allow_rebase_merge}").then(JSON.parse, () => ({ merge: true, squash: true, rebase: true })),
+    };
+  const allowed = await mergeSettings.allowed;
+  let last = "";
+  try {
+    last = localStorage.getItem(lastMethodKey()) ?? "";
+  } catch {
+    // Storage is off; the methods keep GitHub's order.
+  }
+  // The methods the repository allows (GitHub turns off the others), the one you used last first.
   const methods = [
-    { label: "Create a merge commit", flag: "--merge" },
-    { label: "Squash and merge", flag: "--squash" },
-    { label: "Rebase and merge", flag: "--rebase" },
-  ];
+    { label: "Create a merge commit", flag: "--merge", key: "merge" },
+    { label: "Squash and merge", flag: "--squash", key: "squash" },
+    { label: "Rebase and merge", flag: "--rebase", key: "rebase" },
+  ]
+    .filter((m) => allowed[m.key] !== false)
+    .sort((a, b) => Number(b.key === last) - Number(a.key === last));
   // Until checks and reviews pass, GitHub can merge on its own once they do.
   const auto = pr.mergeStateStatus !== "CLEAN" && pr.mergeStateStatus !== "UNSTABLE" && pr.mergeStateStatus !== "HAS_HOOKS";
   pick(`Merge #${pr.number} into ${pr.baseRefName}`, () =>
     methods.map((m) => ({
       label: m.label,
+      detail: m.key === last ? "last used" : undefined,
       // Confirmed in the palette rather than a native dialog, which a page reload could leave stuck on screen.
       run: () => {
         const go = (extra: string[], verb: string) => async () => {
           const merged = await withProgress(`${verb} #${pr.number}…`, () => gh("pr", "merge", String(pr.number), m.flag, ...extra), { error: `Can't merge #${pr.number}` });
+          try {
+            if (merged !== undefined) localStorage.setItem(lastMethodKey(), m.key);
+          } catch {
+            // Storage is off; nothing to remember.
+          }
           if (merged !== undefined) host.status(extra.includes("--auto") ? `Turned on auto-merge for #${pr.number}` : `Merged #${pr.number}`);
           renderPullRequest(pr.number);
         };
@@ -1344,10 +1382,6 @@ function merge(pr: Details) {
   );
 }
 
-/**
- * Fetches the pull request's head and base, then diffs a file from their merge base to the head, with its
- * line comments under their lines. `at` scrolls to a thread.
- */
 /** Each pull request's merge base, once its head and base are fetched, per head commit, so a push fetches again. */
 const mergeBases = new Map<string, Promise<string>>();
 
@@ -1734,10 +1768,85 @@ export async function updateBranchPullRequest() {
     button.title = `${pr.title} (checks ${checks})`;
     button.onclick = () => showPullRequest(pr.number, pr.title);
     button.hidden = false;
+    branchThreads = { number: pr.number, threads: await lineComments(pr.number) };
   } catch {
     // No pull request for this branch, or no GitHub remote.
+    branchThreads = undefined;
   }
+  for (const model of monaco.editor.getModels()) decorateComments(model);
 }
+
+// ---- Comments in the editor ----
+
+/** The line threads of the checked-out branch's pull request, which its files show in the editor. */
+let branchThreads: { number: number; threads: Thread[] } | undefined;
+const commentDecorations = new Map<monaco.editor.ITextModel, string[]>();
+
+/**
+ * Shows the pull request's threads on the checked-out branch's files, where you fix what they ask: a comment icon
+ * in the gutter, the latest comment after an unresolved thread's line, and the whole thread on hover, with a link
+ * that opens it in the pull request's diff. The lines are the pull request's; local edits after loading move them
+ * along, but commits that aren't pushed yet can put them a few lines off.
+ */
+function decorateComments(model: monaco.editor.ITextModel) {
+  if (model.isDisposed() || model.uri.scheme !== "file") return;
+  const root = host.root();
+  const path = model.uri.fsPath.startsWith(`${root}/`) ? model.uri.fsPath.slice(root.length + 1) : "";
+  const threads = branchThreads?.threads.filter((t) => t.path === path && t.side === "RIGHT" && t.line && t.line <= model.getLineCount()) ?? [];
+  const number = branchThreads?.number;
+  const ids = model.deltaDecorations(
+    commentDecorations.get(model) ?? [],
+    threads.map((t) => {
+      const last = t.comments[t.comments.length - 1];
+      const hover = t.comments.map((c) => `**${c.user}** · ${ago(c.created_at)}\n\n${c.body}`).join("\n\n---\n\n");
+      const link = `[Open in #${number}](command:tusk.prs.openThread?${encodeURIComponent(JSON.stringify([number, t.id]))})`;
+      const firstLine = last.body.replace(/```[\s\S]*?```/g, "(suggestion)").split("\n").find((l) => l.trim()) ?? "";
+      return {
+        range: new monaco.Range(t.line!, 1, t.line!, 1),
+        options: {
+          glyphMarginClassName: `codicon codicon-comment${t.resolved ? "" : "-unresolved"} pr-glyph${t.resolved ? " resolved" : ""}`,
+          glyphMargin: { position: monaco.editor.GlyphMarginLane.Right },
+          glyphMarginHoverMessage: { value: `${t.resolved ? "_Resolved_\n\n" : ""}${hover}\n\n${link}`, isTrusted: true, supportHtml: false },
+          // The latest word on an open thread, after its line, as an editor shows review comments inline.
+          ...(t.resolved ? {} : { isWholeLine: true, className: "pr-comment-line", after: { content: `   ${last.user}: ${firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine}`, inlineClassName: "pr-inline-comment" } }),
+          stickiness: 1,
+        },
+      };
+    }),
+  );
+  commentDecorations.set(model, ids);
+}
+
+/** "3 hours ago", for a comment's date in a hover. */
+function ago(at: string) {
+  const time = Date.parse(at) / 1000;
+  return Number.isNaN(time) ? "" : age(time) === "now" ? "just now" : `${age(time)} ago`;
+}
+
+/** Opens a thread from the editor in its pull request's diff. */
+async function openThread(number: number, id: number) {
+  const t = branchThreads?.number === number ? branchThreads.threads.find((x) => x.id === id) : undefined;
+  if (!t) return;
+  const pr = await withProgress(`Opening #${number}…`, async () => JSON.parse(await gh("pr", "view", String(number), "--json", DETAIL_FIELDS)) as Details, { error: `Can't open #${number}` });
+  if (pr) showFileDiff(pr, t.path, branchThreads!.threads, t);
+}
+
+monaco.editor.onDidCreateModel((model) => {
+  decorateComments(model);
+  model.onWillDispose(() => commentDecorations.delete(model));
+});
+monaco.editor.registerCommand("tusk.prs.openThread", (_, number: number, id: number) => openThread(number, id));
+// A click on a thread's icon opens it, rather than adding a breakpoint there.
+monaco.editor.onDidCreateEditor((editor) =>
+  editor.onMouseDown((e) => {
+    if (!e.event.leftButton || !e.target.element?.classList.contains("pr-glyph")) return;
+    const line = e.target.position?.lineNumber;
+    const model = editor.getModel();
+    const id = line && model ? model.getLineDecorations(line).find((d) => commentDecorations.get(model)?.includes(d.id)) : undefined;
+    const t = id && branchThreads?.threads.find((x) => x.line === line && model!.uri.fsPath.endsWith(`/${x.path}`));
+    if (t && branchThreads) openThread(branchThreads.number, t.id);
+  }),
+);
 
 // ---- Creating a pull request ----
 

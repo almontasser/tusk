@@ -389,10 +389,20 @@ conversation, and **Request Changes** needs one. On your own pull request,
 only **Comment** shows, since GitHub doesn't let you approve or request changes
 on it.
 
-Click **Check Out** to switch to the branch. When the current branch has a pull
+Click **Check Out** to switch to the branch. On the pull request's branch,
+the button reads **Checked Out**, or **Pull** when the pull request's head on
+GitHub differs from your branch; **Pull** fast-forwards to GitHub's commits.
+
+On the branch of a pull request, its line comments show in the editor too, on
+the lines they're about: a comment icon in the gutter (yellow while the thread
+is unresolved), a faint highlight on the line, and the latest comment after the
+line's end. Hover the icon to read the whole thread, and click it, or **Open in
+#123** in the hover, to open the thread in the pull request's diff. When the current branch has a pull
 request, its number and check status appear next to the branch name in the
 status bar. **Merge…** asks how to merge (a merge commit, squash, or rebase)
-and asks you to confirm before it merges on GitHub. The confirmation also
+and asks you to confirm before it merges on GitHub. It offers only the methods
+the repository allows, when GitHub tells you (it tells repository admins), and
+puts the one you used last first. The confirmation also
 offers to delete the branch after merging, and, while checks or reviews are
 still missing, **Merge When Ready**, which turns on GitHub's auto-merge.
 

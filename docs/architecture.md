@@ -3952,6 +3952,20 @@ The list's new-activity mark compares each row's `updatedAt` with the one you
 last saw, which the tab saves in `localStorage` (`pr-seen:<project>`) whenever
 it draws. It's a per-computer convenience; losing it loses only the marks.
 
+`updateBranchPullRequest` also loads the current branch's pull request's line
+threads into `branchThreads`, and `decorateComments` draws them on every file
+model through `onDidCreateModel`: a glyph in the right glyph-margin lane, so a
+bookmark on the left lane still shows, a whole-line class, and an `after`
+inline text. The hover is trusted Markdown with a `command:` link to
+`tusk.prs.openThread`. A click on the glyph opens the thread too; `debug.ts`
+skips `.pr-glyph` so it doesn't add a breakpoint. Threads keep the pull
+request's line numbers, so unpushed commits that move lines put them off.
+
+`merge` reads `allow_merge_commit`, `allow_squash_merge`, and
+`allow_rebase_merge` from the repository once per project. GitHub returns them
+only to admins; when they're null, all three methods show. The last method you
+merged with is kept in `localStorage` per project.
+
 #### Fields, checks, and the status box
 
 There are three field lists: `FIELDS` for the status bar's lookup, `LIST_FIELDS`

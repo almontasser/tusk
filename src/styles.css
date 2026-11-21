@@ -782,6 +782,7 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .pr-head-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
 .pr-head-actions button:not(.icon-button), .pr-section-bar button, .pr-status-line button, .pr-rows li > button:not(.icon-button) { height: 26px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); white-space: nowrap; }
 .pr-head-actions button.primary { border-color: transparent; }
+.pr-head-actions button.pr-checked-out { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); background: transparent; cursor: default; }
 .pr-head-actions button.primary:disabled { background: var(--panel); color: var(--faint); border-color: var(--border); opacity: 1; }
 .pr-head-actions button:hover:not(:disabled), .pr-section-bar button:hover:not(:disabled), .pr-status-line button:hover, .pr-rows li > button:not(.icon-button):hover { background: var(--hover); }
 .pr-head-actions button.primary:hover:not(:disabled) { background: var(--accent-hover); }
@@ -873,6 +874,10 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .pr-check-group { font-weight: 600; background: color-mix(in srgb, var(--text) 3%, transparent); cursor: default; }
 .pr-check-group .muted { font-weight: 400; font-size: 12px; }
 .pr-checks .pr-check-group ~ .pr-check { padding-left: 34px; }
+.pr-glyph { color: var(--yellow); cursor: pointer; font-size: 14px !important; }
+.pr-glyph.resolved { color: var(--faint); }
+.pr-comment-line { background: color-mix(in srgb, var(--yellow) 7%, transparent); }
+.pr-inline-comment { color: var(--faint); font-style: italic; font-family: var(--ui-family); }
 .log-link { color: var(--accent); text-decoration: underline; cursor: pointer; }
 
 /* Side column */
@@ -935,6 +940,10 @@ button.link:hover { text-decoration: underline; }
 .pr-comment-form textarea { width: 100%; box-sizing: border-box; resize: none; font: var(--ui); }
 .pr-comment-form .pr-actions { margin-top: 6px; }
 .pr-body { overflow-wrap: anywhere; margin-top: 4px; -webkit-user-select: text; user-select: text; line-height: 1.5; }
+.pr-glyph { color: var(--yellow); cursor: pointer; font-size: 14px !important; }
+.pr-glyph.resolved { color: var(--faint); }
+.pr-comment-line { background: color-mix(in srgb, var(--yellow) 7%, transparent); }
+.pr-inline-comment { color: var(--faint); font-style: italic; font-family: var(--ui-family); }
 .log-link { color: var(--accent); text-decoration: underline; cursor: pointer; }
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }
