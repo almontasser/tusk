@@ -12,7 +12,7 @@ import { writer } from "./prthreads";
 import { loadPullRequests, problemItem } from "./prlist";
 import { updateBranchPullRequest } from "./preditor";
 import { showPullRequest } from "./prpage";
-import { autosaveKey, createArgs, defaultTemplate, existingFrom, headSpec, headTarget, parseNumstat, remoteFor, type Saved, TEMPLATE_PATHSPECS, templateChoices } from "./prcreatedata.ts";
+import { autosaveKey, createArgs, defaultTemplate, existingFrom, headSpec, headTarget, isRemoteUrl, parseNumstat, remoteFor, type Saved, TEMPLATE_PATHSPECS, templateChoices } from "./prcreatedata.ts";
 
 // ---- Creating a pull request ----
 
@@ -54,7 +54,9 @@ export async function createPullRequest() {
   page.replaceChildren(el("p", "muted pr-loading", "Loading…"));
   showEditorView("New Pull Request", page, "git-pull-request-create", () => {});
   page.hidden = false;
-  const { remote: headRemote, branch: headBranch } = headTarget(branch, status.upstream);
+  const config = (key: string) => git("config", "--get", `branch.${branch}.${key}`).then((v) => v.trim(), () => "");
+  const [configRemote, configMerge] = await Promise.all([config("remote"), config("merge")]);
+  const { remote: headRemote, branch: headBranch } = headTarget(branch, status.upstream, { remote: configRemote, merge: configMerge });
   const key = autosaveKey(host.root(), branch);
   let remotes: string;
   let headRepo: Repo;
@@ -63,7 +65,7 @@ export async function createPullRequest() {
   const known = new Map<string, Repo>();
   try {
     let current: Repo;
-    [remotes, current, headRepo] = await Promise.all([git("remote", "-v"), viewRepo(), git("remote", "get-url", headRemote).then((url) => viewRepo(url.trim()))]);
+    [remotes, current, headRepo] = await Promise.all([git("remote", "-v"), viewRepo(), (isRemoteUrl(headRemote) ? Promise.resolve(headRemote) : git("remote", "get-url", headRemote)).then((url) => viewRepo(url.trim()))]);
     currentRepo = current.nameWithOwner;
     for (const r of [current, headRepo]) known.set(r.nameWithOwner, r);
     // A fork's pull request goes to its parent by default, as on GitHub; you can still pick the fork itself.
@@ -349,7 +351,11 @@ export async function createPullRequest() {
     try {
       // gh can't push for you without asking, so the branch goes up first, through the dialog for passwords.
       const s = gitStatus();
-      if (s?.upstream !== `${headRemote}/${headBranch}` || s.ahead > 0) {
+      // A URL remote has no remote-tracking branch to compare with, so ask the remote where the branch is.
+      const pushed = isRemoteUrl(headRemote)
+        ? (await git("ls-remote", headRemote, `refs/heads/${headBranch}`).catch(() => "")).split("\t")[0] === (await git("rev-parse", "HEAD")).trim()
+        : s?.upstream === `${headRemote}/${headBranch}` && s.ahead === 0;
+      if (!pushed) {
         if ((await gitTask(`Pushing ${branch}…`, ["push", "-u", headRemote, "HEAD"], `Can't push ${branch}`)) === undefined) return;
       }
       const args = createArgs({

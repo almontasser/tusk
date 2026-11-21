@@ -46,10 +46,16 @@ export function remoteFor(remotes: string, repo: string): string | undefined {
  * name. A branch started from `origin/main` or `upstream/main` tracks a branch it doesn't push to, so it goes to
  * origin under its own name, as the push before creating does.
  */
-export function headTarget(branch: string, upstream?: string): { remote: string; branch: string } {
+export function headTarget(branch: string, upstream?: string, config?: { remote?: string; merge?: string }): { remote: string; branch: string } {
+  // `gh pr checkout` of a fork's pull request stores the fork's URL as the branch's remote, which has no
+  // remote-tracking branch, so `upstream` is empty; the branch's config still names where it goes.
+  if (config?.remote && config.merge === `refs/heads/${branch}`) return { remote: config.remote, branch };
   const slash = upstream?.indexOf("/") ?? -1;
   return upstream && slash > 0 && upstream.slice(slash + 1) === branch ? { remote: upstream.slice(0, slash), branch } : { remote: "origin", branch };
 }
+
+/** Whether a remote is a URL, as `gh pr checkout` stores for a fork, rather than a remote's name. */
+export const isRemoteUrl = (remote: string) => /[:/]/.test(remote);
 
 /**
  * The `--head` of a pull request: the branch alone in its own repository, or `owner:branch` from a fork, which

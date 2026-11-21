@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { autosaveKey, createArgs, defaultTemplate, existingFrom, headSpec, headTarget, parseNumstat, remoteFor, repoFromUrl, templateChoices } from "./prcreatedata.ts";
+import { autosaveKey, createArgs, defaultTemplate, existingFrom, headSpec, headTarget, isRemoteUrl, parseNumstat, remoteFor, repoFromUrl, templateChoices } from "./prcreatedata.ts";
 
 test("templates list the single file first as Default, then the folder's by name", () => {
   const t = templateChoices([".github/PULL_REQUEST_TEMPLATE/feature.md", ".github/PULL_REQUEST_TEMPLATE/bug.md", ".github/pull_request_template.md"]);
@@ -70,6 +70,12 @@ test("numstat reads plain files, renames, and binary files", () => {
 test("the head's remote is the upstream's only when it has the branch's name", () => {
   assert.deepEqual(headTarget("fix"), { remote: "origin", branch: "fix" });
   assert.deepEqual(headTarget("fix", "fork/fix"), { remote: "fork", branch: "fix" });
+  // A fork's pull request checked out with gh: the branch's remote is the fork's URL.
+  assert.deepEqual(headTarget("fix", undefined, { remote: "git@github.com:someone/repo.git", merge: "refs/heads/fix" }), { remote: "git@github.com:someone/repo.git", branch: "fix" });
+  assert.deepEqual(headTarget("fix", undefined, { remote: "origin", merge: "refs/heads/main" }), { remote: "origin", branch: "fix" });
+  assert.equal(isRemoteUrl("git@github.com:someone/repo.git"), true);
+  assert.equal(isRemoteUrl("https://github.com/someone/repo"), true);
+  assert.equal(isRemoteUrl("origin"), false);
   assert.deepEqual(headTarget("fix", "upstream/main"), { remote: "origin", branch: "fix" });
   assert.deepEqual(headTarget("feature/x", "origin/feature/x"), { remote: "origin", branch: "feature/x" });
 });
