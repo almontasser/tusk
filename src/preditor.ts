@@ -112,7 +112,7 @@ export async function decorateComments(model: monaco.editor.ITextModel) {
         options: {
           glyphMarginClassName: `codicon codicon-comment${t.resolved ? "" : "-unresolved"} pr-glyph${t.resolved ? " resolved" : ""}`,
           glyphMargin: { position: monaco.editor.GlyphMarginLane.Right },
-          glyphMarginHoverMessage: { value: `${t.resolved ? "_Resolved_\n\n" : ""}${hover}\n\n${link}`, isTrusted: true, supportHtml: false },
+          glyphMarginHoverMessage: { value: `${t.resolved ? "_Resolved_\n\n" : ""}${hover}\n\n${link}`, isTrusted: { enabledCommands: ["tusk.prs.openThread"] }, supportHtml: false },
           // The latest word on an open thread, after its line, as an editor shows review comments inline.
           ...(t.resolved ? {} : { isWholeLine: true, className: "pr-comment-line", after: { content: `   ${last.user}: ${firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine}`, inlineClassName: "pr-inline-comment" } }),
           stickiness: 1,

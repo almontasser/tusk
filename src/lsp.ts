@@ -172,9 +172,10 @@ function registerProblemHover() {
         contents: markers.map((m) => {
           const problem = { path: model.uri.fsPath, range: monaco.Range.lift(m), message: m.message, severity: m.severity, source: m.source, code: typeof m.code === "string" ? m.code : m.code?.value };
           const rule = ruleLabel(problem.source, problem.code);
-          // problems.ts handles the command, which opens the problem on a page of its own.
+          // problems.ts handles the command, which opens the problem on a page of its own. It's the only command the
+          // hover trusts: messages can come from CI annotations, which a pull request's own workflow writes.
           const open = `[Show Details](command:problems.openPage?${encodeURIComponent(JSON.stringify([problem]))} "Show the whole problem on a page")`;
-          return { value: `${problemIcons[m.severity]} ${problemMarkdown(m.message)}\n\n${rule ? `\`${rule}\` · ` : ""}${open}`, supportThemeIcons: true, isTrusted: true };
+          return { value: `${problemIcons[m.severity]} ${problemMarkdown(m.message)}\n\n${rule ? `\`${rule}\` · ` : ""}${open}`, supportThemeIcons: true, isTrusted: { enabledCommands: ["problems.openPage"] } };
         }),
       };
     },
