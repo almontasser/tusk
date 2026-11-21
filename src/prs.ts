@@ -438,6 +438,8 @@ export async function showPullRequest(number: number) {
         else await submitReview(pr, event, body);
         host.status(done);
         reload();
+        // The diff on screen showed the comments as pending; they're submitted threads now.
+        if (shown?.pr.number === number) (shown.threads = await lineComments(number).catch(() => shown!.threads)), drawZones();
       } catch (e) {
         showError(`Can't ${label.toLowerCase()}`, e);
         buttons.querySelectorAll("button").forEach((x) => (x.disabled = false));
@@ -446,7 +448,8 @@ export async function showPullRequest(number: number) {
     buttons.append(b);
   };
   reply(hasPending ? `Submit Review (${pendingComments.length})` : "Comment", "COMMENT", true, hasPending ? `Submitted your review on #${number}` : `Commented on #${number}`);
-  if (open) {
+  // GitHub takes no verdict on your own pull request, only comments.
+  if (open && pr.author.login !== myLogin) {
     reply("Approve", "APPROVE", false, `Approved #${number}`);
     reply("Request Changes", "REQUEST_CHANGES", true, `Requested changes on #${number}`);
   }
@@ -703,6 +706,7 @@ function requestReview(pr: Details, run: (progress: string, args: string[], done
   const asked = new Set([...pr.reviewRequests.map((r) => r.login), ...pr.latestReviews.map((r) => r.author.login)]);
   pick("Request a review from", async (q) => {
     const logins = (await people.catch((e) => (showError("Can't list the people who can review", e), [] as string[]))).filter((l) => l !== pr.author.login);
+    if (!logins.length) return [{ label: "No one else in the repository can review", run: () => {} }];
     return logins
       .filter((l) => l.toLowerCase().includes(q.toLowerCase()))
       .map((l) => ({ label: l, detail: asked.has(l) ? "asked again" : undefined, run: () => run(`Requesting a review from ${l}…`, ["pr", "edit", String(pr.number), "--add-reviewer", l], `Asked ${l} to review #${pr.number}`, `Can't request a review from ${l}`) }));
@@ -1025,12 +1029,21 @@ function loadPending(number: number): Promise<Pending | null> {
   return done;
 }
 
+// ponytail: the first 100 pending comments and threads; a review with more shows the rest without their side.
+const PENDING = `query($id: ID!) { node(id: $id) { ... on PullRequestReview {
+  comments(first: 100) { nodes { databaseId path line startLine originalLine body author { login } createdAt replyTo { databaseId } } }
+  pullRequest { reviewThreads(first: 100) { nodes { diffSide comments(first: 100) { nodes { databaseId } } } } }
+} } }`;
+
 async function readPending(number: number): Promise<Pending | null> {
   const found = (await gh("api", `repos/{owner}/{repo}/pulls/${number}/reviews`, "--paginate", "--jq", '.[] | select(.state == "PENDING") | {id, node: .node_id}')).trim();
   if (!found) return (pending = null);
   const { id, node } = JSON.parse(found.split("\n")[0]);
-  const jq = ".[] | {id, path, line: (.line // .original_line), start_line, side: (.side // \"RIGHT\"), body, user: .user.login, in_reply_to_id, created_at}";
-  const out = await gh("api", "--paginate", `repos/{owner}/{repo}/pulls/${number}/reviews/${id}/comments`, "--jq", jq);
+  // REST lists a pending comment with only its diff position, no line, so its lines come from GraphQL, and its
+  // side from its thread.
+  const jq = `.data.node as $r | ($r.pullRequest.reviewThreads.nodes | map(.diffSide as $s | .comments.nodes[] | {key: (.databaseId | tostring), value: $s}) | from_entries) as $sides
+    | $r.comments.nodes[] | {id: .databaseId, path, line: (.line // .originalLine), start_line: .startLine, side: ($sides[.databaseId | tostring] // "RIGHT"), body, user: .author.login, in_reply_to_id: .replyTo.databaseId, created_at: .createdAt}`;
+  const out = await gh("api", "graphql", "-f", `query=${PENDING}`, "-f", `id=${node}`, "--jq", jq);
   return (pending = { number, id, node, comments: out.split("\n").filter(Boolean).map((l) => JSON.parse(l)) });
 }
 

@@ -3857,7 +3857,10 @@ the one comment.
 Pending comments live in your pending review on GitHub, so the browser and the
 editor show the same one. GitHub lists a pending review only to its author, so
 `loadPending` finds yours in `pulls/<n>/reviews` (state `PENDING`) and reads its
-comments from `reviews/<id>/comments`. The REST API can add comments to a
+comments through GraphQL (`PENDING` in `prs.ts`): REST's `reviews/<id>/comments`
+gives a pending comment only its diff `position`, with `line` null, so it never
+drew in the diff. GraphQL gives the line, and the side comes from the comment's
+review thread (`diffSide`). The REST API can add comments to a
 review only while creating it, so the first comment creates the review (a POST
 to `pulls/<n>/reviews` with the comment and no `event`, which leaves it
 pending), and later ones go through GraphQL's `addPullRequestReviewThread`

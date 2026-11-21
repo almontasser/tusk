@@ -671,7 +671,8 @@ export function actionsJob(url: string | undefined): { run: string; job: string 
 
 /**
  * Makes `gh run view --log-failed` readable: each line starts with the job, the step, and a timestamp, split by
- * tabs. Keeps the step once, as a heading, and the text, without the timestamp or escape codes.
+ * tabs. Keeps the step once, as a heading, and the text, without the timestamp or color codes, which gh prints
+ * either as escapes or spelled out as `^[[36m`.
  */
 export function cleanLog(log: string): string {
   let step = "";
@@ -684,7 +685,7 @@ export function cleanLog(log: string): string {
     }
     // gh names a step it can't match to the job's steps UNKNOWN STEP, and then prints the whole job.
     if (parts[1] !== step) (step = parts[1]), step !== "UNKNOWN STEP" && out.push(`${out.length ? "\n" : ""}── ${step} ──`);
-    out.push(parts.slice(2).join("\t").replace(/^﻿?\d{4}-\d\d-\d\dT[\d:.]+Z ?/, "").replace(/\x1b\[[\d;]*m/g, ""));
+    out.push(parts.slice(2).join("\t").replace(/^\uFEFF?\d{4}-\d\d-\d\dT[\d:.]+Z ?/, "").replace(/(?:\x1b|\^\[)\[[\d;]*m/g, ""));
   }
   return out.join("\n");
 }

@@ -350,7 +350,9 @@ pending review, replies join it too, and **Comment Now** isn't offered, since
 GitHub takes no comment outside the review. To submit, write an optional summary
 below the conversation and click **Submit Review**, **Approve**, or **Request
 Changes**. Without a pending review, **Comment** adds a comment to the
-conversation, and **Request Changes** needs one.
+conversation, and **Request Changes** needs one. On your own pull request,
+only **Comment** shows, since GitHub doesn't let you approve or request changes
+on it.
 
 Click **Check Out** to switch to the branch. When the current branch has a pull
 request, its number and check status appear next to the branch name in the
