@@ -992,8 +992,10 @@ button.link:hover { text-decoration: underline; }
 #diff header .codicon-diff { color: var(--muted); }
 #diff-path { font-weight: 600; min-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #diff header > button { flex-shrink: 0; }
-#diff-files:not([hidden]) { display: flex; align-items: center; gap: 4px; min-width: 0; flex-shrink: 1; }
-#diff-files select { min-width: 60px; max-width: 280px; height: 26px; }
+/* The file list and its controls keep their size; the path and label shrink with an ellipsis instead. */
+#diff-files:not([hidden]) { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+#diff-label { min-width: 0; flex-shrink: 1; }
+#diff-files select { min-width: 60px; max-width: 200px; height: 26px; }
 #diff-files .muted { white-space: nowrap; }
 .diff-viewed { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; padding: 0 8px; height: 24px; border: 1px solid var(--border); border-radius: var(--radius); white-space: nowrap; }
 .diff-viewed:has(:checked) { color: var(--green); border-color: color-mix(in srgb, var(--green) 50%, transparent); }
@@ -3297,6 +3299,7 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 /* Pull requests: diff commenting */
 .pr-diff-extras { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; white-space: nowrap; }
 .pr-diff-extras > button { height: 24px; padding: 0 8px; }
+.pr-diff-extras > button.icon-button { width: 24px; padding: 0; }
 .pr-diff-extras .diff-viewed { margin-left: 0; }
 .pr-no-add-glyph { cursor: not-allowed; }
 .pr-drag-range { background: color-mix(in srgb, var(--accent) 14%, transparent); }

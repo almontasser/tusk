@@ -4041,7 +4041,7 @@ Write/Preview tabs (`writer`) are only on the tab's boxes: a box in the diff is
 a view zone with a fixed height, which a preview would overflow.
 
 The list's review queue needs `reviewRequests` on each row, which the open
-list asks for; the closed lists leave it out with `statusCheckRollup`.
+list asks for; the closed lists leave it out.
 
 **Since your review** takes the commit of your latest submitted review
 (`reviews[].commit.oid`), fetches it by ID if a force push left it out, and
@@ -4115,12 +4115,14 @@ request in the first section it belongs to. A row whose repository matches
 `gh repo view --json nameWithOwner` has its number as its key and opens in a
 tab; other rows have their URL as the key and open in the browser.
 
-The closed, merged, and all lists leave out `statusCheckRollup`, because GitHub
-times out building it for 50 closed pull requests. An `IntersectionObserver`
+Every list leaves out `statusCheckRollup`: building it for 50 pull requests in
+one request takes about 25 seconds on a busy repository's open list, and times
+out for closed ones, while the list without it takes about 1 second. An
+`IntersectionObserver`
 collects the numbers of rows that scroll into view and sends them as one
 GraphQL query, one `pullRequest` alias per number (`checksQuery`), and the rows
-get their icons from `commits(last: 1)`'s `statusCheckRollup.state`. Results
-are kept until the list's query changes.
+get their icons from `commits(last: 1)`'s `statusCheckRollup.state`. Each load
+of the list, a refresh included, starts the icons over, since checks change.
 
 The activity bar badge uses the button's `data-count`, as the Problems badge
 does, from `gh pr list --search review-requested:@me --json number`. It updates

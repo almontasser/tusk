@@ -109,8 +109,10 @@ export function showFileDiff(pr: Details, path: string, threads: Thread[], at?: 
     show: () => showOneDiff(pr, f.path, threads, f.path === path ? at : undefined, since?.oid, (f as { from?: string }).from),
     // Comment on File, and GitHub's Viewed checkbox for the file.
     extra: () => {
-      const comment = el("button", "", "Comment on File");
-      comment.title = "Comment on the whole file rather than on its lines";
+      // An icon, since the diff's header is crowded; the title and label say what it does.
+      const comment = el("button", "icon-button codicon codicon-comment-discussion");
+      comment.title = "Comment on File: the whole file rather than its lines";
+      comment.setAttribute("aria-label", "Comment on File");
       // The form opens above the first line, so the diff scrolls up to it.
       comment.onclick = () => ((form = { side: "RIGHT", line: 0, start: 0, file: true }), drawZones(), shown?.diff.getModifiedEditor().setScrollTop(0));
       const extras = el("span", "pr-diff-extras");

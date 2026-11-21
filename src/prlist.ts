@@ -21,7 +21,10 @@ export async function loadPullRequests() {
   const text = query.text.trim();
   // Switching back to the view keeps the last list while it refreshes; a new project, filter, or search starts over.
   const key = JSON.stringify([host.root(), everywhere, { ...query, text }]);
-  if ($("pr-list").dataset.key !== key) ($("pr-list").dataset.key = key), (limit = 50), lazyChecks.clear(), wanted.clear(), $("pr-list").replaceChildren(el("li", "muted", "Loading…"));
+  if ($("pr-list").dataset.key !== key) ($("pr-list").dataset.key = key), (limit = 50), $("pr-list").replaceChildren(el("li", "muted", "Loading…"));
+  // A refresh reloads the check icons too, since checks change while you watch.
+  lazyChecks.clear();
+  wanted.clear();
   void updateReviewBadge(true);
   const more = el("li", "pr-more");
   const button = el("button", "", "Load More");
@@ -29,9 +32,10 @@ export async function loadPullRequests() {
   more.append(button);
   try {
     if (everywhere) return await loadEverywhere(key, more);
-    // GitHub times out building the check status of 50 closed pull requests; the rows on screen load it later.
+    // Check status loads later, for the rows on screen: building it for 50 pull requests in one request makes GitHub
+    // slow on a busy repository (25 seconds on laravel/framework's open list) or time out, closed lists first.
     const closed = closedList(query);
-    const fields = closed ? LIST_FIELDS.replace(",statusCheckRollup", "").replace(",reviewRequests", "") : LIST_FIELDS;
+    const fields = LIST_FIELDS.replace(",statusCheckRollup", "").replace(closed ? ",reviewRequests" : "", "");
     const [prs]: [ListedPullRequest[], unknown] = await Promise.all([gh("pr", "list", "--limit", String(limit), "--json", fields, ...listArgs(query)).then(JSON.parse), me()]);
     if ($("pr-list").dataset.key !== key) return; // A newer search replaced this one.
     const seenAt = seen();
@@ -39,7 +43,7 @@ export async function loadPullRequests() {
     const filtered = !!(text || filterSummary(query));
     checkObserver?.disconnect();
     $("pr-list").replaceChildren(
-      ...(prs.length ? sections(query.state === "open" && !filtered ? prs : [], prs).flatMap(([title, group]) => [...(title ? [sectionHead(title, group.length)] : []), ...group.map((pr) => prRow(pr, seenAt, closed))]) : [el("li", "muted", filtered ? "No pull requests match the search and filters." : "No pull requests.")]),
+      ...(prs.length ? sections(query.state === "open" && !filtered ? prs : [], prs).flatMap(([title, group]) => [...(title ? [sectionHead(title, group.length)] : []), ...group.map((pr) => prRow(pr, seenAt, true))]) : [el("li", "muted", filtered ? "No pull requests match the search and filters." : "No pull requests.")]),
       // gh has no offset, so Load More asks for a longer list; a full page means there may be more.
       ...(prs.length === limit ? [more] : []),
     );
@@ -214,7 +218,7 @@ export async function updateReviewBadge(soon = false) {
 /** Forgets when the badge last loaded, so a project switch counts again at once. */
 export const resetReviewBadge = () => (badgeAt = 0);
 
-// ---- Check status for the closed lists, loaded for the rows on screen ----
+// ---- Check status, loaded for the rows on screen ----
 
 /** Each pull request's checks, once loaded, for the list on screen; a new list starts over. */
 const lazyChecks = new Map<number, string>();

@@ -279,9 +279,8 @@ GitHub CLI. Filter by open pull requests, ones you created, ones waiting for
 your review, or closed, merged, or all pull requests, and type in the search
 box to search them with GitHub's search syntax, such as `fix label:bug`. Each
 row shows check status (✓ passed, ✗ failed, ● running), the review decision,
-the lines added and removed, when it last changed, and its labels. In the
-closed, merged, and all lists, the check status fills in as rows scroll into
-view. The **Open** list, without a search or filters, is split into a review
+the lines added and removed, when it last changed, and its labels. The check
+status fills in as rows scroll into view, and again when you refresh. The **Open** list, without a search or filters, is split into a review
 queue: **Waiting for your review**, **Yours**, and **Everyone else**. The list
 shows 50 at a time; **Load More** at the end shows 50 more. If the GitHub CLI
 isn't installed, or you aren't logged in, the tab says so and offers to fix it.
