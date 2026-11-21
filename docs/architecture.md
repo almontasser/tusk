@@ -3913,6 +3913,19 @@ The pull request for the current branch (`gh pr view` without a number) loads
 when the branch or project changes, through `branchListeners` in `git.ts`.
 It makes a network call, so it doesn't run on every refresh.
 
+#### The pull request tab
+
+A pull request opens in an editor tab: `showPullRequest` moves `#pr-detail` out
+of the sidebar with `showEditorView`, and the sidebar keeps the list.
+`renderPullRequest` draws the tab without focusing it, so a refresh after an
+action never pulls you out of a diff. It keeps the open section (`section`),
+the scroll position, and the comment box's text (`drafts`) across the redraw.
+The layout is a header row, then a grid of the main column (section tabs and
+the section) and a side column (the status box, reviewers, and labels). A
+container query turns it into one column under 760 pixels, for a split pane.
+Avatars load from the pull request's own host (`<origin>/<login>.png`), and
+fall back to the login's initial when they don't load.
+
 #### Fields, checks, and the status box
 
 There are three field lists: `FIELDS` for the status bar's lookup, `LIST_FIELDS`
@@ -3933,9 +3946,11 @@ and `gh run rerun <run> --failed` take. `cleanLog` drops the job column and
 timestamps and prints each step once as a heading. `linkPaths` then tries each
 path in the log from each of its folders down, with `path_exists`, so a CI path
 such as `/home/runner/work/app/app/tests/X.php` finds `tests/X.php`. While any
-check runs, `watchChecks` reloads `statusCheckRollup` every 15 seconds and
-redraws only the checks list, so it never clears a comment you're typing; it
-stops once the list leaves the page.
+check runs and the Checks tab is drawn, `watchChecks` reloads
+`statusCheckRollup` every 15 seconds and redraws only the checks list, so it
+never clears a comment you're typing. A hidden tab skips the reload but keeps
+the timer, and it stops once another pull request or a redraw replaces the
+list.
 
 The Viewed checkboxes are GitHub's own (`viewerViewedState` on the pull
 request's `files` in GraphQL, changed by `markFileAsViewed` and
@@ -9901,3 +9916,12 @@ user code:
   GitHub: you can run the tests before you commit, and undo works.
 - Checks refresh by polling every 15 seconds while any run. `gh` has no
   subscription for check runs, and polling stops when the page changes.
+
+### 2026-11-21: Pull requests open in an editor tab
+
+- The sidebar was too narrow for a pull request: titles wrapped over three
+  lines, check names were cut off, and long check lists pushed the files and
+  conversation out of sight. The page now opens in an editor tab, like a diff,
+  with sections in tabs and the merge status beside them, as on GitHub.
+- The list stays in the sidebar, so you switch pull requests without going
+  back.

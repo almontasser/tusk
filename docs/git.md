@@ -272,12 +272,23 @@ the lines added and removed, when it last changed, and its labels. The list
 shows 50 at a time; **Load More** at the end shows 50 more. If the GitHub CLI isn't installed, or
 you aren't logged in, the tab says so and offers to fix it.
 
-Click a pull request to see its checks, changed files, commits, description,
-reviews, and comments. Under the title, you see its labels and its reviewers:
-✓ approved, ✗ changes requested, and ● still asked to review.
+Click a pull request to open it in an editor tab, beside your files; the list
+marks the one that's open. The header shows the title, the state (Open, Draft,
+Merged, or Closed), the author, the branches (click one to copy its name), and
+the buttons: **Refresh**, **Open in Browser**, **More Actions**, **Check Out**,
+and **Merge…**. Tabs switch between **Conversation**, **Commits**, **Checks**,
+and **Files**, each with a count; refreshing keeps the tab and your place in
+it. In a narrow pane, such as a split editor, the page becomes one column.
 
-A status box under the buttons tells you what stands between the pull request
-and merging, with a button that deals with it:
+The column beside the tabs shows the status box, the reviewers (✓ approved,
+✗ changes requested, ● still asked to review), and the labels. The gear next
+to **Reviewers** requests a review, and the one next to **Labels** adds or
+removes labels.
+
+The status box tells you what stands between the pull request and merging, as
+GitHub's merge box does: the checks (with **Details**, which opens the Checks
+tab), the review decision, and whether it can merge, with a button that deals
+with it:
 
 - **Draft**: click **Ready for Review**.
 - **Conflicts** with the base branch: click **Check Out** and merge the base
@@ -289,11 +300,12 @@ and merging, with a button that deals with it:
 
 ### Checks
 
-Checks list failed ones first, and the heading counts them by state. While
-some checks fail or run, passed and skipped ones fold into a **Show** link. While
+Checks list failed ones first, and the bar above them counts them by state.
+While some checks fail or run, passed and skipped ones fold into a **Show**
+link. While
 checks run, the list reloads every 15 seconds on its own. Click a check to
-open its page in your browser. A failed GitHub Actions job has a **Log** link
-that shows the log of its failed steps in the editor, without the timestamps,
+open its log, if it failed in GitHub Actions, or else its page in your
+browser. The log button on a failed job shows the log of its failed steps in the editor, without the timestamps,
 scrolled to the first error, such as PHPUnit's `There were 2 failures`.
 File paths in the log that exist in the project, such as
 `tests/Feature/OrderTest.php:42`, are links: click one to open the file at that
@@ -303,10 +315,10 @@ line. **Re-run Failed** in the heading runs the failed jobs again.
 
 Click a changed file to see its diff without checking out the branch. ⌥⌘← and
 ⌥⌘→, or the arrows in the diff's header, move to the previous or next file of
-the pull request, with its comments. A 💬 count marks files with line
+the pull request, with its comments. A comment count marks files with line
 comments; it's yellow while a thread there is unresolved. Each file has
 GitHub's **Viewed** checkbox, so the files you've read are the same here and in
-the browser, and the heading counts them.
+the browser, and a bar above the files shows how many you've viewed.
 
 Click a commit to see its own diff.
 
@@ -319,11 +331,11 @@ your browser. `#123` links to that issue or pull request, and
 Line comments appear in the conversation under the file and lines they're on.
 Click one to open the diff at that line. In the diff, each thread shows under
 its line, with **Reply** and **Resolve** links. A resolved thread shows as one
-line; click **Show** to read it or **Unresolve** to reopen it. The
-conversation's heading counts unresolved threads; click **Go to Unresolved**
-to open the first, and **Next Unresolved** under a thread to go on to the next,
-across files. Your own comments, in the diff and in the conversation, have
-**Edit** and **Delete** links, and your own review summaries have **Edit**.
+line; click **Show** to read it or **Unresolve** to reopen it. In the Files
+tab, **Go to Unresolved** opens the first unresolved thread, and **Next
+Unresolved** under a thread goes on to the next, across files. Your own
+comments, in the diff and in the conversation, have **Edit** and **Delete**
+links, and your own review summaries have **Edit**.
 Deleting asks you to click **Delete** again to confirm.
 
 To comment on code in the diff:
@@ -348,7 +360,7 @@ Pending comments show in the diff with a yellow edge and on the pull request's
 page under **Pending review**, where you can delete them. While you have a
 pending review, replies join it too, and **Comment Now** isn't offered, since
 GitHub takes no comment outside the review. To submit, write an optional summary
-below the conversation and click **Submit Review**, **Approve**, or **Request
+in the comment box, which stays at the bottom of the Conversation tab, and click **Submit Review**, **Approve**, or **Request
 Changes**. Without a pending review, **Comment** adds a comment to the
 conversation, and **Request Changes** needs one. On your own pull request,
 only **Comment** shows, since GitHub doesn't let you approve or request changes
@@ -361,8 +373,7 @@ and asks you to confirm before it merges on GitHub. The confirmation also
 offers to delete the branch after merging, and, while checks or reviews are
 still missing, **Merge When Ready**, which turns on GitHub's auto-merge.
 
-The **Refresh** button in the tab's header reloads the pull request on screen.
-**More…** edits the title, requests a review, adds or removes labels, converts
+**More Actions** (the **…** button) edits the title, requests a review, adds or removes labels, converts
 the pull request to a draft or marks it ready, updates the branch, closes or
 reopens it, and copies its link or branch name.
 
